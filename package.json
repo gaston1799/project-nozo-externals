@@ -1,0 +1,26 @@
+{
+  "name": "project-nozo-externals",
+  "version": "1.0.0",
+  "description": "External modules for `.PROJECT NOZO w NEXT`.",
+  "main": "index.js",
+  "scripts": {
+    "build": "node scripts/scripts.js",
+    "check": "node --check src/utils.js && node --check scripts/scripts.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gaston1799/project-nozo-externals.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/gaston1799/project-nozo-externals/issues"
+  },
+  "homepage": "https://github.com/gaston1799/project-nozo-externals#readme",
+  "devDependencies": {
+    "javascript-obfuscator": "^5.4.2",
+    "terser": "^5.47.1"
+  }
+}
