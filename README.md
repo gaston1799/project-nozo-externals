@@ -31,6 +31,7 @@ Add these to your userscript header in load order:
 // @require https://cdn.jsdelivr.net/gh/gaston1799/project-nozo-externals@main/dist/net-events.min.js
 // @require https://cdn.jsdelivr.net/gh/gaston1799/project-nozo-externals@main/dist/traps.min.js
 // @require https://cdn.jsdelivr.net/gh/gaston1799/project-nozo-externals@main/dist/autobreak.min.js
+// @require https://cdn.jsdelivr.net/gh/gaston1799/project-nozo-externals@main/dist/movement.min.js
 ```
 
 ## Vendor files (`dist/vendor/`)
@@ -54,6 +55,7 @@ gpu.js is loaded from unpkg CDN directly (not vendored here).
 | `net-events.min.js` | Built from `src/net-events.js` | `unsafeWindow.NozoNext.netEvents` | 9 |
 | `traps.min.js` | Built from `src/traps.js` | `unsafeWindow.NozoNext.traps` | 10 |
 | `autobreak.min.js` | Built from `src/autobreak.js` | `unsafeWindow.NozoNext.autoBreak` | 11 |
+| `movement.min.js` | Built from `src/movement.js` | `unsafeWindow.NozoNext.movement` | 12 |
 
 ## Globals
 
@@ -67,6 +69,7 @@ gpu.js is loaded from unpkg CDN directly (not vendored here).
 - `unsafeWindow.NozoNext.netEvents`
 - `unsafeWindow.NozoNext.traps`
 - `unsafeWindow.NozoNext.autoBreak`
+- `unsafeWindow.NozoNext.movement`
 - `window.EasyStar` (vendor)
 - `window.msgpack` (vendor)
 
@@ -304,3 +307,82 @@ Methods:
 Each candidate angle is scored against the sweep cone (π/2.6 half-angle).
 Hitting enemy damaging objects earns reward; hitting team objects costs reward.
 Level 3 (break-all) inverts team-object cost to encourage clearing them.
+
+## `Nozo.movement` API (`movement.min.js`)
+
+Movement foundation. All movement sends go through `Nozo.packet.sendMove`.
+Does **not** send combat packets. Movement state is kept separate from
+`Nozo.state.combat`, `Nozo.state.traps`, and `Nozo.state.autoBreak`.
+
+State (live reference — do not cache):
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `Nozo.movement.state.target` | `{ x, y }\|null` | Current world-coordinate target |
+| `Nozo.movement.state.path` | `Array\|null` | Ordered waypoint list; leading waypoint is consumed by `computeMoveDir` |
+| `Nozo.movement.state.lastMoveDir` | `number\|null` | Angle (radians) of the last move packet sent |
+| `Nozo.movement.state.lastMoveTick` | `number\|null` | Game tick of the last move send |
+| `Nozo.movement.state.lastMoveTime` | `number\|null` | `Date.now()` of the last move send |
+| `Nozo.movement.state.blockedReason` | `string\|null` | Reason the last `step()` was blocked |
+| `Nozo.movement.state.strategy` | `string` | Active strategy name (`"direct"` by default) |
+| `Nozo.movement.state.active` | `boolean` | `true` while a target or non-empty path is set |
+
+Also reachable at `Nozo.state.movement`.
+
+Target / path management:
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `setTarget(target)` | `{ ok, reason? }` | Set a `{ x, y }` world target; activates the module. |
+| `clearTarget(reason)` | `void` | Clear the current target; deactivates if no path remains. |
+| `setPath(path)` | `{ ok, reason? }` | Set an ordered array of `{ x, y }` waypoints. |
+| `clearPath(reason)` | `void` | Clear the current path; deactivates if no target remains. |
+
+Gating and direction:
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `canMove(context)` | `{ ok, reason, debug }` | Returns `ok: false` with reason `"no-player"`, `"no-target"`, `"no-packet-module"`, `"socket"`, or `"manual-override"`. Never throws. |
+| `computeMoveDir(context)` | `number\|null` | Angle (radians) toward the leading path waypoint, or strategy result if no path. Returns `null` if direction cannot be computed. |
+
+Movement send:
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `sendMove(angle, context)` | `{ ok, sent?, reason? }` | Send a `"9"` move packet via `Nozo.packet.sendMove`. Updates `lastMoveDir`, `lastMoveTick`, `lastMoveTime`. |
+
+Tick entry point:
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `step(context)` | `{ ok, reason?, debug? }` | Single-tick movement step: `canMove` gate → `computeMoveDir` → `sendMove`. Called by bridge tick loop after net-state rebuild. |
+
+Strategy registry (seam for future pathfinder integration):
+
+| Method | Description |
+|--------|-------------|
+| `setStrategy(name, fn)` | Register a named strategy function `(context) => angle\|null`. Active strategy is used by `computeMoveDir` when no path is set. |
+| `computePath(context)` | Invoke the active strategy directly. Returns `angle\|null`. |
+
+Built-in strategy: `"direct"` — straight-line `atan2` from player position to `state.target`.
+
+Debug:
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `getDebugState()` | `{}` | Snapshot of `state`, strategy list, current tick, and time. |
+| `getHistory()` | `Array` | Copy of last N send/block records. |
+
+### No-direct-packet-send rule
+
+`Nozo.movement` must not send `D` (direction/attack) or `K` (gather/swing) packets.
+All movement sends use `Nozo.packet.sendMove` (packet type `"9"`) only.
+
+### EasyStar adapter seam
+
+The active pathfinder in `moomoo.js` (`Pathfinder`, line 26711) is an EasyStar-based
+grid pathfinder deeply coupled to the legacy globals. It cannot be cleanly extracted
+in Phase 9. The `setStrategy` API provides the adapter seam for future wiring:
+bridge code with access to EasyStar and the game grid can register an `"easystar"`
+strategy and call `Nozo.movement.state.strategy = "easystar"` to activate it
+without touching the movement module source.
