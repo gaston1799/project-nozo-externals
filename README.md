@@ -70,6 +70,58 @@ gpu.js is loaded from unpkg CDN directly (not vendored here).
 - `window.EasyStar` (vendor)
 - `window.msgpack` (vendor)
 
+## `Nozo.netEvents` API (`net-events.min.js`)
+
+`Nozo.netEvents` is callable directly as `Nozo.netEvents(type, data[, ctx])` and also
+exposes all object-API methods as properties.
+
+Registration:
+
+| Method | Description |
+|--------|-------------|
+| `register(type, fn)` | Register a single handler for a message type; unrestricted. |
+| `registerMany(map)` | Register many handlers at once; pass `null` as a value to unregister. |
+| `setHandlers(overrides)` | Legacy guarded API — only overrides keys that already exist in the map. |
+
+Dispatch:
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `dispatch(type, data, ctx)` | `{ ok, handled, type, reason? }` | Route a decoded server message. `io-init` sets `ctx.socketID` and returns immediately. No-handler returns `{ ok: false, reason: "no-handler" }`. |
+
+Default handlers (auto-registered at module load):
+
+| Type | Name | State written |
+|------|------|---------------|
+| `C` | setupGame | `state.mySid` |
+| `a` | updatePlayers | `state.playersRaw`, `state.players[]`, `state.player`, `state.near[]`, `state.enemy[]` |
+| `H` | loadGameObject | `state.gameObjects[]` (upsert by sid; flat array stride 8) |
+| `Q` | killObject | removes from `state.gameObjects` and `state.liztobj` by object sid |
+| `R` | killObjects | removes all objects from those lists with matching `ownerSid` (or array of object sids) |
+| `G` | updateLeaderboard | `state.leaderboard` |
+| `7` | updateMinimap | `state.minimap` |
+| `N` | updatePlayerValue | `state.player[index]`, `state.lastPlayerValueUpdateAt` |
+| `O` | updateHealth | `state.players[i].health` / `.oldHealth`, `state.lastHealthUpdateAt` |
+
+### player data format (from `a` handler, stride 13)
+
+`state.players` entries are plain objects with: `sid`, `x`, `y`, `x2`, `y2`, `dir`,
+`buildIndex`, `weaponIndex`, `weaponVariant`, `team`, `isLeader`, `skinIndex`,
+`tailIndex`, `iconIndex`, `zIndex`, `visible`, and optionally `health` / `oldHealth`
+(written by `O` handler).
+
+### gameObjects format (from `H` handler, stride 8)
+
+`state.gameObjects` entries: `sid`, `x`, `y`, `dir`, `scale`, `type`, `dataIndex`,
+`ownerSid`, `active`.
+
+### Notes
+
+- `state.player` is only populated when `state.mySid` is set (requires the `C`/setupGame packet handler to have fired).
+- `state.near` and `state.enemy` are rebuilt on every `a` tick from `state.players` relative to `state.player`.
+- Default handlers write only to `Nozo.state.*`; no legacy globals are touched.
+- Callers can override any default with `register(type, fn)` or `setHandlers({ type: fn })`.
+
 ## `Nozo.input` API (`input.min.js`)
 
 State (live references — do not cache):
