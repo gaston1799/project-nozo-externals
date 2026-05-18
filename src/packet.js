@@ -29,20 +29,26 @@
         },
 
         sendPacket: function sendPacket(type) {
+            const args = Array.prototype.slice.call(arguments, 1);
+            return net.sendPacketData(type, args);
+        },
+
+        sendPacketData: function sendPacketData(type, dataArray) {
             const ws = net.getSocket();
             if (!ws || ws.readyState !== WebSocket.OPEN) return false;
             if (!root.msgpack) return false;
-            const args = Array.prototype.slice.call(arguments, 1);
-            const binary = root.msgpack.encode([type, args]);
+            if (!Array.isArray(dataArray)) return false;
+            const binary = root.msgpack.encode([type, dataArray]);
             ws.send(binary);
             return true;
         },
 
         sendDirection: function sendDirection(angle, tag) {
-            if (typeof angle !== "number") return false;
-            _record("D", [angle], tag);
-            if (Nozo.log) Nozo.log("packet:D", { angle: angle, tag: tag || null, t: Date.now() });
-            return net.sendPacket("D", angle);
+            const numericAngle = Number(angle);
+            if (!isFinite(numericAngle)) return false;
+            _record("D", [numericAngle], tag);
+            if (Nozo.log) Nozo.log("packet:D", { angle: numericAngle, tag: tag || null, t: Date.now() });
+            return net.sendPacketData("D", [numericAngle]);
         },
 
         sendMove: function sendMove(angle, extra) {
