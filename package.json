@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "build": "node scripts/scripts.js",
-    "check": "node --check src/utils.js && node --check src/constants.js && node --check src/packet.js && node --check src/input.js && node --check src/combat.js && node --check src/net-events.js && node --check src/traps.js && node --check src/autobreak.js && node --check src/movement.js && node --check scripts/scripts.js"
+    "check": "node --check src/utils.js && node --check src/constants.js && node --check src/packet.js && node --check src/input.js && node --check src/combat.js && node --check src/net-events.js && node --check src/traps.js && node --check src/autobreak.js && node --check src/movement.js && node --check src/render.js && node --check src/html.js && node --check scripts/scripts.js"
   },
   "repository": {
     "type": "git",
