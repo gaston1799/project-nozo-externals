@@ -24,6 +24,7 @@ Add these to your userscript header in load order:
 // @require https://cdn.jsdelivr.net/gh/gaston1799/project-nozo-externals@main/dist/vendor/easystar.min.js
 // @require https://cdn.jsdelivr.net/gh/gaston1799/project-nozo-externals@main/dist/vendor/msgpack.min.js
 // @require https://cdn.jsdelivr.net/gh/gaston1799/project-nozo-externals@main/dist/utils.min.js
+// @require https://cdn.jsdelivr.net/gh/gaston1799/project-nozo-externals@main/dist/constants.min.js
 ```
 
 ## Vendor files (`dist/vendor/`)
@@ -37,14 +38,16 @@ gpu.js is loaded from unpkg CDN directly (not vendored here).
 
 ## Project modules (`dist/`)
 
-| File | Source | Global exposed |
-|------|--------|---------------|
-| `utils.min.js` | Built from `src/utils.js` | `unsafeWindow.NozoNext.Utils`, `unsafeWindow.NozoUtils` |
+| File | Source | Global exposed | Load order |
+|------|--------|---------------|------------|
+| `utils.min.js` | Built from `src/utils.js` | `unsafeWindow.NozoNext.Utils`, `unsafeWindow.NozoUtils` | 4 |
+| `constants.min.js` | Built from `src/constants.js` | `unsafeWindow.NozoNext.constants` | 5 |
 
 ## Globals
 
 - `unsafeWindow.NozoNext.Utils`
 - `unsafeWindow.NozoNext.createUtils()`
 - `unsafeWindow.NozoUtils`
+- `unsafeWindow.NozoNext.constants`
 - `window.EasyStar` (vendor)
 - `window.msgpack` (vendor)
