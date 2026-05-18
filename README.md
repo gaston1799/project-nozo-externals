@@ -28,6 +28,9 @@ Add these to your userscript header in load order:
 // @require https://cdn.jsdelivr.net/gh/gaston1799/project-nozo-externals@main/dist/packet.min.js
 // @require https://cdn.jsdelivr.net/gh/gaston1799/project-nozo-externals@main/dist/input.min.js
 // @require https://cdn.jsdelivr.net/gh/gaston1799/project-nozo-externals@main/dist/combat.min.js
+// @require https://cdn.jsdelivr.net/gh/gaston1799/project-nozo-externals@main/dist/net-events.min.js
+// @require https://cdn.jsdelivr.net/gh/gaston1799/project-nozo-externals@main/dist/traps.min.js
+// @require https://cdn.jsdelivr.net/gh/gaston1799/project-nozo-externals@main/dist/autobreak.min.js
 ```
 
 ## Vendor files (`dist/vendor/`)
@@ -48,6 +51,9 @@ gpu.js is loaded from unpkg CDN directly (not vendored here).
 | `packet.min.js` | Built from `src/packet.js` | `unsafeWindow.NozoNext.packet` | 6 |
 | `input.min.js` | Built from `src/input.js` | `unsafeWindow.NozoNext.input` | 7 |
 | `combat.min.js` | Built from `src/combat.js` | `unsafeWindow.NozoNext.combat` | 8 |
+| `net-events.min.js` | Built from `src/net-events.js` | `unsafeWindow.NozoNext.netEvents` | 9 |
+| `traps.min.js` | Built from `src/traps.js` | `unsafeWindow.NozoNext.traps` | 10 |
+| `autobreak.min.js` | Built from `src/autobreak.js` | `unsafeWindow.NozoNext.autoBreak` | 11 |
 
 ## Globals
 
@@ -58,6 +64,9 @@ gpu.js is loaded from unpkg CDN directly (not vendored here).
 - `unsafeWindow.NozoNext.packet`
 - `unsafeWindow.NozoNext.input`
 - `unsafeWindow.NozoNext.combat`
+- `unsafeWindow.NozoNext.netEvents`
+- `unsafeWindow.NozoNext.traps`
+- `unsafeWindow.NozoNext.autoBreak`
 - `window.EasyStar` (vendor)
 - `window.msgpack` (vendor)
 
@@ -154,3 +163,92 @@ Debug:
 All combat packet sends must go through `Nozo.combat`. Callers must not call
 `Nozo.packet.sendDirection` or `Nozo.packet.sendGather` directly for combat purposes.
 `F` attack packets are intentionally unsupported and not exposed in the combat API.
+
+## `Nozo.traps` API (`traps.min.js`)
+
+Detects enemy traps near the player and provides an aim angle for `Nozo.combat.calculateAim`.
+Does **not** send any packets and does **not** contain placement logic.
+
+State (live reference — do not cache):
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `Nozo.traps.state.inTrap` | `boolean` | True when the player is inside an enemy trap |
+| `Nozo.traps.state.aim` | `number\|null` | Current aim angle (radians); consumed by `Nozo.combat.calculateAim` tier 3 |
+| `Nozo.traps.state.target` | `object\|null` | Snapshot of the current aim target `{ x, y, sid, trap }` |
+| `Nozo.traps.state.lastScan` | `number\|null` | Tick of the last `scan()` call |
+| `Nozo.traps.state.lastReason` | `string\|null` | Reason string from the last scan result |
+| `Nozo.traps.state.debug` | `object\|null` | Debug data from the last scan |
+
+Also reachable at `Nozo.state.traps`.
+
+Methods:
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `scan(context)` | `{ ok, aim, target, inTrap, reason, debug }` | Scan object/player lists for traps; updates state. Never throws. |
+| `setAim(angle, tag, expireTick)` | `void` | Manually set the aim entry. |
+| `clearAim(reason)` | `void` | Clear current aim. |
+| `getAim(context)` | `{ angle, tag, expireTick }\|null` | Return current aim entry, or null if expired/absent. |
+| `getDebugState()` | `{}` | Snapshot of aim entry, state, tick, and time. |
+| `getHistory()` | `Array` | Copy of last N scan/aim event records. |
+
+### closeObjects fallback
+
+`scan()` resolves object lists in this order:
+1. `context.liztobj` (preferred)
+2. `Nozo.state.liztobj`
+3. `context.closeObjects` (fallback when liztobj is empty)
+4. `Nozo.state.closeObjects`
+5. `context.gameObjects` / `Nozo.state.gameObjects` (last resort)
+
+`closeObjects` is treated as a `liztobj` equivalent — they refer to the same
+server-provided close-objects list aliased under different names in moomoo.js.
+
+## `Nozo.autoBreak` API (`autobreak.min.js`)
+
+Selects the best breakable object target near the player, scores aim angles to
+minimise friendly-fire, and stores aim for `Nozo.combat.calculateAim`.
+Does **not** send any packets directly. Swings are only sent when
+`requestBreak` is called with `context.send === true`, which routes through
+`Nozo.combat.swingAt`.
+
+State (live reference — do not cache):
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `Nozo.autoBreak.state.active` | `boolean` | True when a valid target and aim are set |
+| `Nozo.autoBreak.state.aim` | `number\|null` | Current best aim angle (radians); consumed by `Nozo.combat.calculateAim` tier 4 |
+| `Nozo.autoBreak.state.target` | `object\|null` | Snapshot of current target `{ x, y, sid, dmg, trap }` |
+| `Nozo.autoBreak.state.lastScan` | `number\|null` | Tick of the last `scan()` call |
+| `Nozo.autoBreak.state.lastReason` | `string\|null` | Reason string from the last scan result |
+| `Nozo.autoBreak.state.debug` | `object\|null` | Debug data from the last scan |
+
+Also reachable at `Nozo.state.autoBreak`.
+
+Methods:
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `scan(context)` | `{ ok, aim, target, level, reason, debug }` | Scan for breakable objects; populate 4-tier priority; update state. Never throws. |
+| `setAim(angle, tag, expireTick)` | `void` | Manually set the aim entry. |
+| `clearAim(reason)` | `void` | Clear current aim and deactivate. |
+| `getAim(context)` | `{ angle, tag, expireTick }\|null` | Return current aim entry, or null if expired/absent. |
+| `requestBreak(target, context)` | `{ ok, aim, target, sent, reason }` | Scan + aim update. Sends a swing via `Nozo.combat.swingAt` **only** when `context.send === true`. |
+| `getDebugState()` | `{}` | Snapshot of aim entry, state, tick, and time. |
+| `getHistory()` | `Array` | Copy of last N scan/aim event records. |
+
+### Priority tiers
+
+| Tier | Condition | Objects |
+|------|-----------|---------|
+| 0 | `Nozo.state.traps.inTrap === true` | Closest enemy spikes ≤ 169 px + the trap object the player is inside |
+| 1 | Always | All enemy spikes ≤ 169 px |
+| 2 | Always | Enemy turrets, teleporters, and blockers |
+| 3 | Always (aborted if nearest enemy ≤ 569 px) | All enemy non-null-type objects |
+
+### Aim scoring
+
+Each candidate angle is scored against the sweep cone (π/2.6 half-angle).
+Hitting enemy damaging objects earns reward; hitting team objects costs reward.
+Level 3 (break-all) inverts team-object cost to encourage clearing them.
