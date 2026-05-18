@@ -5,6 +5,7 @@
     const root = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
     const Nozo = root.NozoNext = root.NozoNext || {};
 
+    // One global router — never recreated per message.
     const handlers = {
         A: null, // setInitData
         C: null, // setupGame
@@ -41,6 +42,7 @@
         9: null  // pingMap
     };
 
+    // setHandlers: legacy guarded API — only overrides keys that already exist.
     function setHandlers(overrides) {
         if (!overrides || typeof overrides !== "object") return;
         const keys = Object.keys(overrides);
@@ -49,6 +51,21 @@
             if (Object.prototype.hasOwnProperty.call(handlers, key)) {
                 handlers[key] = overrides[key];
             }
+        }
+    }
+
+    // register: unrestricted single-handler registration.
+    function register(type, fn) {
+        if (type == null || typeof fn !== "function") return;
+        handlers[type] = fn;
+    }
+
+    // registerMany: unrestricted bulk registration; pass null to unregister.
+    function registerMany(map) {
+        if (!map || typeof map !== "object") return;
+        const keys = Object.keys(map);
+        for (let i = 0; i < keys.length; i++) {
+            handlers[keys[i]] = typeof map[keys[i]] === "function" ? map[keys[i]] : null;
         }
     }
 
@@ -69,11 +86,239 @@
         return { ok: true, handled: true, type: type };
     }
 
-    Nozo.netEvents = {
-        handlers: handlers,
-        setHandlers: setHandlers,
-        dispatch: dispatch
-    };
+    // --- internal helpers -----------------------------------------------
+
+    function _ensureArrays() {
+        const s = Nozo.state;
+        if (!s) return;
+        if (!Array.isArray(s.gameObjects)) s.gameObjects = [];
+        if (!Array.isArray(s.liztobj)) s.liztobj = [];
+    }
+
+    function _rebuildNearEnemy() {
+        const s = Nozo.state;
+        if (!s) return;
+        const player = s.player;
+        const list = Array.isArray(s.players) ? s.players : [];
+        if (!player || !list.length) {
+            s.near = [];
+            s.enemy = [];
+            return;
+        }
+        const pTeam = player.team;
+        const mySid = player.sid;
+        const near = [];
+        const enemy = [];
+        for (let i = 0; i < list.length; i++) {
+            const p = list[i];
+            if (!p) continue;
+            if (mySid != null && p.sid === mySid) continue;
+            near.push(p);
+            if (pTeam == null || p.team == null || p.team !== pTeam) enemy.push(p);
+        }
+        s.near = near;
+        s.enemy = enemy;
+    }
+
+    function _removeObjectBySid(sid) {
+        if (sid == null) return;
+        _ensureArrays();
+        const s = Nozo.state;
+        for (let i = s.gameObjects.length - 1; i >= 0; i--) {
+            if (s.gameObjects[i] && s.gameObjects[i].sid === sid) { s.gameObjects.splice(i, 1); break; }
+        }
+        for (let i = s.liztobj.length - 1; i >= 0; i--) {
+            if (s.liztobj[i] && s.liztobj[i].sid === sid) { s.liztobj.splice(i, 1); break; }
+        }
+    }
+
+    // --- default handlers -----------------------------------------------
+
+    // C: setupGame — captures the local player's server-assigned SID so that
+    // _handlerA can identify the self-player in the players list.
+    function _handlerC(yourSid) {
+        const s = Nozo.state;
+        if (!s) return;
+        s.mySid = yourSid;
+        if (Nozo.log) Nozo.log("net:setupGame", { mySid: yourSid });
+    }
+
+    // a: updatePlayers — flat array, 13 values per player:
+    //   [sid, x2, y2, dir, buildIndex, weaponIndex, weaponVariant,
+    //    team, isLeader, skinIndex, tailIndex, iconIndex, zIndex]
+    // Merges into existing player records to preserve accumulated state (e.g. health).
+    function _handlerA(data) {
+        if (!Array.isArray(data)) return;
+        const s = Nozo.state;
+        if (!s) return;
+        s.playersRaw = data;
+        if (!Array.isArray(s.players)) s.players = [];
+
+        const seenSids = {};
+        for (let i = 0; i + 13 <= data.length; i += 13) {
+            const sid = data[i];
+            if (sid == null) continue;
+            seenSids[sid] = true;
+            let p = null;
+            for (let j = 0; j < s.players.length; j++) {
+                if (s.players[j] && s.players[j].sid === sid) { p = s.players[j]; break; }
+            }
+            if (!p) { p = { sid: sid }; s.players.push(p); }
+            p.x            = data[i + 1];
+            p.y            = data[i + 2];
+            p.x2           = data[i + 1];
+            p.y2           = data[i + 2];
+            p.dir          = data[i + 3];
+            p.buildIndex   = data[i + 4];
+            p.weaponIndex  = data[i + 5];
+            p.weaponVariant = data[i + 6];
+            p.team         = data[i + 7];
+            p.isLeader     = data[i + 8];
+            p.skinIndex    = data[i + 9];
+            p.tailIndex    = data[i + 10];
+            p.iconIndex    = data[i + 11];
+            p.zIndex       = data[i + 12];
+            p.visible      = true;
+        }
+
+        // Mark players absent from this tick as invisible (not removed — E handles removal).
+        for (let j = 0; j < s.players.length; j++) {
+            if (s.players[j] && !seenSids[s.players[j].sid]) s.players[j].visible = false;
+        }
+
+        // Identify self-player if mySid is known (set by C / setupGame handler).
+        const mySid = s.mySid;
+        if (mySid != null) {
+            for (let j = 0; j < s.players.length; j++) {
+                if (s.players[j] && s.players[j].sid === mySid) { s.player = s.players[j]; break; }
+            }
+        }
+
+        _rebuildNearEnemy();
+    }
+
+    // H: loadGameObject — flat array, 8 values per object:
+    //   [sid, x, y, dir, scale, type, dataIndex, ownerSid]
+    // Upserts into state.gameObjects; existing entries for the same sid are replaced.
+    function _handlerH(data) {
+        if (!Array.isArray(data)) return;
+        _ensureArrays();
+        const s = Nozo.state;
+        for (let i = 0; i + 8 <= data.length; i += 8) {
+            const sid = data[i];
+            if (sid == null) continue;
+            const obj = {
+                sid:       sid,
+                x:         data[i + 1],
+                y:         data[i + 2],
+                dir:       data[i + 3],
+                scale:     data[i + 4],
+                type:      data[i + 5],
+                dataIndex: data[i + 6],
+                ownerSid:  data[i + 7],
+                active:    true
+            };
+            let found = false;
+            for (let j = 0; j < s.gameObjects.length; j++) {
+                if (s.gameObjects[j] && s.gameObjects[j].sid === sid) {
+                    s.gameObjects[j] = obj;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) s.gameObjects.push(obj);
+        }
+    }
+
+    // Q: killObject — remove single game object by its own SID.
+    function _handlerQ(sid) {
+        _removeObjectBySid(sid);
+    }
+
+    // R: killObjects — legacy form: remove all objects owned by player ownerSid.
+    //   Accepts an array of individual object SIDs as well (for flexibility).
+    function _handlerR(ownerSidOrArray) {
+        if (ownerSidOrArray == null) return;
+        _ensureArrays();
+        const s = Nozo.state;
+        if (Array.isArray(ownerSidOrArray)) {
+            for (let i = 0; i < ownerSidOrArray.length; i++) _removeObjectBySid(ownerSidOrArray[i]);
+        } else {
+            const ownerSid = ownerSidOrArray;
+            for (let i = s.gameObjects.length - 1; i >= 0; i--) {
+                if (s.gameObjects[i] && s.gameObjects[i].ownerSid === ownerSid) s.gameObjects.splice(i, 1);
+            }
+            for (let i = s.liztobj.length - 1; i >= 0; i--) {
+                if (s.liztobj[i] && s.liztobj[i].ownerSid === ownerSid) s.liztobj.splice(i, 1);
+            }
+        }
+    }
+
+    // G: updateLeaderboard
+    function _handlerG(data) {
+        if (Nozo.state) Nozo.state.leaderboard = data;
+    }
+
+    // 7: updateMinimap
+    function _handler7(data) {
+        if (Nozo.state) Nozo.state.minimap = data;
+    }
+
+    // N: updatePlayerValue — safely writes a field onto the local player object.
+    // Guards against prototype-poisoning keys.
+    function _handlerN(index, value) {
+        const s = Nozo.state;
+        if (!s) return;
+        s.lastPlayerValueUpdateAt = Date.now();
+        const player = s.player;
+        if (!player || index == null) return;
+        if (typeof index !== "string" && typeof index !== "number") return;
+        if (index === "__proto__" || index === "constructor" || index === "prototype") return;
+        player[index] = value;
+    }
+
+    // O: updateHealth — updates health for any player found by SID.
+    function _handlerO(sid, value) {
+        const s = Nozo.state;
+        if (!s) return;
+        s.lastHealthUpdateAt = Date.now();
+        if (!Array.isArray(s.players) || typeof value !== "number") return;
+        for (let i = 0; i < s.players.length; i++) {
+            const p = s.players[i];
+            if (p && p.sid === sid) {
+                p.oldHealth = p.health;
+                p.health = value;
+                return;
+            }
+        }
+    }
+
+    // Auto-register default handlers.
+    registerMany({
+        C: _handlerC,
+        a: _handlerA,
+        H: _handlerH,
+        Q: _handlerQ,
+        R: _handlerR,
+        G: _handlerG,
+        7: _handler7,
+        N: _handlerN,
+        O: _handlerO
+    });
+
+    // Callable facade: Nozo.netEvents(type, data[, ctx]) dispatches directly.
+    // All object-API methods are attached as properties so both call forms work.
+    function netEventsCallable(type, data, ctx) {
+        return dispatch(type, data, ctx);
+    }
+    netEventsCallable.handlers     = handlers;
+    netEventsCallable.setHandlers  = setHandlers;
+    netEventsCallable.dispatch     = dispatch;
+    netEventsCallable.register     = register;
+    netEventsCallable.registerMany = registerMany;
+
+    Nozo.netEvents = netEventsCallable;
+    Nozo.state = Nozo.state || {};
     Nozo.modules = Nozo.modules || {};
-    Nozo.modules.netEvents = Nozo.netEvents;
+    Nozo.modules.netEvents = netEventsCallable;
 })();
