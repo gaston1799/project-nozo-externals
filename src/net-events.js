@@ -140,7 +140,66 @@
         const s = Nozo.state;
         if (!s) return;
         s.mySid = yourSid;
+        if (!Array.isArray(s.players)) s.players = [];
+        if (!Array.isArray(s.enemy)) s.enemy = [];
+        if (!Array.isArray(s.near)) s.near = [];
+        const model = Nozo.playerModel || null;
+        if (model && typeof model.ensurePlayer === "function" && yourSid != null) {
+            const me = model.ensurePlayer(s, yourSid);
+            if (me) {
+                me.visible = false;
+                me.active = true;
+                me.alive = true;
+                s.player = me;
+            }
+        }
         if (Nozo.log) Nozo.log("net:setupGame", { mySid: yourSid });
+    }
+
+    // D: addPlayer — legacy signature: (data, isYou)
+    // data commonly starts with [id, sid, name, x, y, dir, health, maxHealth, scale, skinColor, ...]
+    function _handlerD(data, isYou) {
+        if (!Array.isArray(data) || data.length < 2) return;
+        const s = Nozo.state;
+        if (!s) return;
+
+        const model = Nozo.playerModel || null;
+        const sid = data[1];
+        let p = model && typeof model.ensurePlayer === "function"
+            ? model.ensurePlayer(s, sid)
+            : null;
+        if (!p) {
+            if (!Array.isArray(s.players)) s.players = [];
+            for (let i = 0; i < s.players.length; i++) {
+                if (s.players[i] && s.players[i].sid === sid) { p = s.players[i]; break; }
+            }
+            if (!p) {
+                p = { sid: sid };
+                s.players.push(p);
+            }
+        }
+
+        p.id = data[0];
+        p.sid = sid;
+        p.name = data[2] != null ? data[2] : p.name;
+        p.x = typeof data[3] === "number" ? data[3] : p.x;
+        p.y = typeof data[4] === "number" ? data[4] : p.y;
+        p.x2 = p.x;
+        p.y2 = p.y;
+        p.dir = typeof data[5] === "number" ? data[5] : p.dir;
+        p.health = typeof data[6] === "number" ? data[6] : p.health;
+        p.maxHealth = typeof data[7] === "number" ? data[7] : p.maxHealth;
+        p.scale = typeof data[8] === "number" ? data[8] : p.scale;
+        p.skinColor = data.length > 9 ? data[9] : p.skinColor;
+        p.visible = false;
+        p.active = true;
+        p.alive = true;
+        p.lastSeenAt = Date.now();
+
+        if (isYou === true || (s.mySid != null && sid === s.mySid)) {
+            s.player = p;
+            s.mySid = sid;
+        }
     }
 
     // a: updatePlayers — flat array, 13 values per player:
@@ -153,32 +212,42 @@
         if (!s) return;
         s.playersRaw = data;
         if (!Array.isArray(s.players)) s.players = [];
+        const model = Nozo.playerModel || null;
 
         const seenSids = {};
         for (let i = 0; i + 13 <= data.length; i += 13) {
             const sid = data[i];
             if (sid == null) continue;
             seenSids[sid] = true;
-            let p = null;
-            for (let j = 0; j < s.players.length; j++) {
-                if (s.players[j] && s.players[j].sid === sid) { p = s.players[j]; break; }
+            let p = model && typeof model.ensurePlayer === "function"
+                ? model.ensurePlayer(s, sid)
+                : null;
+            if (!p) {
+                for (let j = 0; j < s.players.length; j++) {
+                    if (s.players[j] && s.players[j].sid === sid) { p = s.players[j]; break; }
+                }
             }
             if (!p) { p = { sid: sid }; s.players.push(p); }
-            p.x            = data[i + 1];
-            p.y            = data[i + 2];
-            p.x2           = data[i + 1];
-            p.y2           = data[i + 2];
-            p.dir          = data[i + 3];
-            p.buildIndex   = data[i + 4];
-            p.weaponIndex  = data[i + 5];
-            p.weaponVariant = data[i + 6];
-            p.team         = data[i + 7];
-            p.isLeader     = data[i + 8];
-            p.skinIndex    = data[i + 9];
-            p.tailIndex    = data[i + 10];
-            p.iconIndex    = data[i + 11];
-            p.zIndex       = data[i + 12];
-            p.visible      = true;
+
+            if (model && typeof model.applyTupleUpdate === "function") {
+                model.applyTupleUpdate(p, data, i);
+            } else {
+                p.x            = data[i + 1];
+                p.y            = data[i + 2];
+                p.x2           = data[i + 1];
+                p.y2           = data[i + 2];
+                p.dir          = data[i + 3];
+                p.buildIndex   = data[i + 4];
+                p.weaponIndex  = data[i + 5];
+                p.weaponVariant = data[i + 6];
+                p.team         = data[i + 7];
+                p.isLeader     = data[i + 8];
+                p.skinIndex    = data[i + 9];
+                p.tailIndex    = data[i + 10];
+                p.iconIndex    = data[i + 11];
+                p.zIndex       = data[i + 12];
+                p.visible      = true;
+            }
         }
 
         // Mark players absent from this tick as invisible (not removed — E handles removal).
@@ -293,17 +362,110 @@
         }
     }
 
+    // E: removePlayer — marks player hidden/inactive.
+    function _handlerE(idOrSid) {
+        const s = Nozo.state;
+        if (!s || idOrSid == null) return;
+        const model = Nozo.playerModel || null;
+        if (!Array.isArray(s.players)) return;
+        for (let i = 0; i < s.players.length; i++) {
+            const p = s.players[i];
+            if (!p) continue;
+            if (p.id === idOrSid || p.sid === idOrSid) {
+                if (model && typeof model.markDead === "function") {
+                    model.markDead(s, p.sid);
+                } else {
+                    p.visible = false;
+                    p.active = false;
+                    p.alive = false;
+                }
+                return;
+            }
+        }
+    }
+
+    // A: setInitData — initial game configuration (items table, ages table, etc.).
+    function _handlerInitData() {
+        const s = Nozo.state;
+        if (!s) return;
+        s.initData = Array.prototype.slice.call(arguments);
+        if (Nozo.log) Nozo.log("net:setInitData", { argc: s.initData.length });
+    }
+
+    // P: killPlayer — victim marked dead; near/enemy rebuilt so aim resolver stays current.
+    function _handlerP(victimIdOrSid, killerIdOrSid) {
+        const s = Nozo.state;
+        if (!s || victimIdOrSid == null) return;
+        if (!Array.isArray(s.players)) return;
+        for (let i = 0; i < s.players.length; i++) {
+            const p = s.players[i];
+            if (!p) continue;
+            if (p.id === victimIdOrSid || p.sid === victimIdOrSid) {
+                p.visible = false;
+                p.active = false;
+                p.alive = false;
+                _rebuildNearEnemy();
+                if (Nozo.log) Nozo.log("net:killPlayer", { victim: victimIdOrSid, killer: killerIdOrSid != null ? killerIdOrSid : null });
+                return;
+            }
+        }
+    }
+
+    // S: updateItemCounts — raw item count args forwarded to player.
+    function _handlerS() {
+        const s = Nozo.state;
+        if (!s) return;
+        const counts = Array.prototype.slice.call(arguments);
+        s.itemCounts = counts;
+        if (s.player) s.player.itemCounts = counts;
+    }
+
+    // T: updateAge — age index and optional XP values forwarded to player.
+    function _handlerT(ageIndex, xp, maxXp) {
+        const s = Nozo.state;
+        if (!s) return;
+        if (ageIndex != null) { s.ageIndex = ageIndex; if (s.player) s.player.age = ageIndex; }
+        if (xp != null) { s.xp = xp; if (s.player) s.player.xp = xp; }
+        if (maxXp != null) { s.maxXp = maxXp; if (s.player) s.player.maxXp = maxXp; }
+    }
+
+    // U: updateUpgrades — available upgrade options forwarded to player.
+    function _handlerU() {
+        const s = Nozo.state;
+        if (!s) return;
+        const upgrades = Array.prototype.slice.call(arguments);
+        s.upgradeOptions = upgrades;
+        if (s.player) s.player.upgradeOptions = upgrades;
+    }
+
+    // V: updateItems — held item IDs (weapons/tools) forwarded to player.
+    function _handlerV() {
+        const s = Nozo.state;
+        if (!s) return;
+        const items = Array.prototype.slice.call(arguments);
+        s.heldItems = items;
+        if (s.player) s.player.heldItems = items;
+    }
+
     // Auto-register default handlers.
     registerMany({
+        A: _handlerInitData,
         C: _handlerC,
+        D: _handlerD,
+        E: _handlerE,
         a: _handlerA,
+        G: _handlerG,
         H: _handlerH,
+        N: _handlerN,
+        O: _handlerO,
+        P: _handlerP,
         Q: _handlerQ,
         R: _handlerR,
-        G: _handlerG,
-        7: _handler7,
-        N: _handlerN,
-        O: _handlerO
+        S: _handlerS,
+        T: _handlerT,
+        U: _handlerU,
+        V: _handlerV,
+        7: _handler7
     });
 
     // Callable facade: Nozo.netEvents(type, data[, ctx]) dispatches directly.
