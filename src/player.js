@@ -16,6 +16,7 @@
             iconIndex: 0,
             weaponIndex: 0,
             weaponVariant: 0,
+            weaponCode: null,  // weapon slot index used for re-select after food placement
             buildIndex: -1,
             isLeader: 0,
             zIndex: 0,
@@ -35,6 +36,7 @@
             kills: 0,
             upgradePoints: 0,
             points: 0,
+            shameCount: 0,  // client-side consecutive heal counter, decremented by healer timer
             items: [0, 3, 6, 10],
             weapons: [0],
             reloads: {
@@ -92,6 +94,7 @@
         player.dir = tuple[i + 3];
         player.buildIndex = tuple[i + 4];
         player.weaponIndex = tuple[i + 5];
+        player.weaponCode = tuple[i + 5];   // sync for _reSelectWeapon
         player.weaponVariant = tuple[i + 6];
         player.team = tuple[i + 7];
         player.isLeader = tuple[i + 8];

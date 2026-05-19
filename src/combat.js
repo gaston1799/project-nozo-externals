@@ -17,6 +17,14 @@
     };
 
     function getWeaponRange(weaponIndex) {
+        // Try parsed catalog from initData (populated by net-events A handler).
+        const s = Nozo.state;
+        if (s && s.itemsData && Array.isArray(s.itemsData.list) && weaponIndex != null) {
+            const entry = s.itemsData.list[weaponIndex];
+            if (entry && typeof entry.range === "number" && entry.range > 0) {
+                return entry.range;
+            }
+        }
         if (weaponIndex != null && _weaponRanges[weaponIndex] != null) {
             return _weaponRanges[weaponIndex];
         }

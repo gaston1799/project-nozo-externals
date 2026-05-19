@@ -13,6 +13,8 @@
     const _MIN_DAMAGE_THRESHOLD = 1;
     // Default food heal amount when initData is absent.
     const _DEFAULT_FOOD_HEAL = 20;
+    // Delay before a shame increment is reversed (mirrors addShameTimer cooldown).
+    const _SHAME_DECAY_MS = 14000;
 
     const maxHistory = (Nozo.constants && Nozo.constants.MAX_LOG) || 64;
     const _history = [];
@@ -126,6 +128,7 @@
                 Nozo.packet.sendPlace(1, angle);
             }
             _reSelectWeapon(player);
+            _addShameTimer(count);
         }
 
         // Skin 56 requires a one-tick delay before placement (mirrors original healer branch).
@@ -139,6 +142,21 @@
         state.healCount++;
         state.lastBlockReason = null;
         return true;
+    }
+
+    // Increment player.shameCount by count, then decrement after _SHAME_DECAY_MS.
+    // Captures the player reference at call time so respawn doesn't corrupt the counter.
+    function _addShameTimer(count) {
+        const player = Nozo.state && Nozo.state.player;
+        if (!player || typeof player !== "object") return;
+        if (typeof player.shameCount !== "number") player.shameCount = 0;
+        player.shameCount += count;
+        const target = player;
+        setTimeout(function () {
+            if (typeof target.shameCount === "number" && target.shameCount > 0) {
+                target.shameCount = Math.max(0, target.shameCount - count);
+            }
+        }, _SHAME_DECAY_MS);
     }
 
     // Cancel any pending heal timer.

@@ -404,12 +404,59 @@
         }
     }
 
+    // Build a normalized items list from the raw first arg of the A packet.
+    // Each entry may be an object with name/type/healing/range/reload/damage, or null.
+    // Items that are not plain objects are stored as minimal { id } placeholders.
+    function _parseInitDataItems(raw) {
+        if (!Array.isArray(raw)) return null;
+        const list = new Array(raw.length);
+        for (let i = 0; i < raw.length; i++) {
+            const src = raw[i];
+            if (src == null) { list[i] = null; continue; }
+            if (typeof src === "object" && !Array.isArray(src)) {
+                list[i] = {
+                    id:      i,
+                    name:    typeof src.name    === "string" ? src.name    : null,
+                    type:    typeof src.type    === "number" ? src.type    : null,
+                    healing: typeof src.healing === "number" ? src.healing : null,
+                    range:   typeof src.range   === "number" ? src.range   : null,
+                    reload:  typeof src.reload  === "number" ? src.reload  : null,
+                    damage:  typeof src.damage  === "number" ? src.damage  : null
+                };
+            } else {
+                list[i] = { id: i };
+            }
+        }
+        return list;
+    }
+
     // A: setInitData — initial game configuration (items table, ages table, etc.).
+    // Parses args into structured catalogs stored at state.itemsData and state.agesData
+    // while preserving the full raw payload at state.initData for compatibility.
     function _handlerInitData() {
         const s = Nozo.state;
         if (!s) return;
-        s.initData = Array.prototype.slice.call(arguments);
-        if (Nozo.log) Nozo.log("net:setInitData", { argc: s.initData.length });
+        const args = Array.prototype.slice.call(arguments);
+        s.initData = args;
+        s.initDataParsed = false;
+
+        // arg[0]: items/objects catalog (food, weapons, structures, etc.)
+        if (Array.isArray(args[0])) {
+            const parsed = _parseInitDataItems(args[0]);
+            s.itemsData = { raw: args[0], list: parsed, readyAt: Date.now() };
+        }
+
+        // arg[1]: ages/upgrades catalog
+        if (Array.isArray(args[1])) {
+            s.agesData = { raw: args[1], list: args[1], readyAt: Date.now() };
+        }
+
+        s.initDataParsed = !!(s.itemsData || s.agesData);
+        if (Nozo.log) Nozo.log("net:setInitData", {
+            argc:       args.length,
+            itemsCount: s.itemsData ? s.itemsData.list.length : 0,
+            agesCount:  s.agesData  ? s.agesData.list.length  : 0
+        });
     }
 
     // P: killPlayer — victim marked dead; near/enemy rebuilt so aim resolver stays current.

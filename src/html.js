@@ -19,11 +19,13 @@
     };
 
     const state = {
-        enabled:  true,
-        mounted:  false,
-        visible:  true,
-        panel:    null,
-        settings: Object.assign({}, _DEFAULTS)
+        enabled:       true,
+        mounted:       false,
+        visible:       true,
+        panel:         null,
+        settings:      Object.assign({}, _DEFAULTS),
+        _debugInterval: null,
+        _debugInfoEl:  null
     };
 
     // --- Storage helpers -------------------------------------------------
@@ -210,6 +212,13 @@
         body.appendChild(_makeSection(doc, "Debug"));
         body.appendChild(_makeRow(doc, "Debug Logging", "debug.enabled", _applyDebug));
 
+        const debugInfoEl = doc.createElement("pre");
+        debugInfoEl.style.cssText = "font-size:9px;color:#aaa;margin:4px 0 0;white-space:pre-wrap;" +
+            "word-break:break-all;max-height:60px;overflow-y:auto;line-height:1.4;";
+        debugInfoEl.textContent = "initData: pending";
+        body.appendChild(debugInfoEl);
+        state._debugInfoEl = debugInfoEl;
+
         panel.appendChild(body);
         doc.body.appendChild(panel);
 
@@ -224,12 +233,37 @@
         _applyMovement(!!state.settings["movement.enabled"]);
         _applyDebug(!!state.settings["debug.enabled"]);
 
+        // Start auto-refresh for debug info display.
+        _refreshDebugInfo();
+        state._debugInterval = root.setInterval(_refreshDebugInfo, 2000);
+
         if (Nozo.log) Nozo.log("html:mount", {});
         return true;
     }
 
+    function _refreshDebugInfo() {
+        const el = state._debugInfoEl;
+        if (!el || !state.mounted || !state.visible) return;
+        const s = Nozo.state || {};
+        const h = (Nozo.healer && Nozo.healer.state) || {};
+        const player = s.player || {};
+        const itemsCount = s.itemsData && Array.isArray(s.itemsData.list) ? s.itemsData.list.length : "-";
+        const agesCount  = s.agesData  && Array.isArray(s.agesData.list)  ? s.agesData.list.length  : "-";
+        const lastHeal   = h.lastHealAt ? ((Date.now() - h.lastHealAt) / 1000).toFixed(1) + "s ago" : "-";
+        el.textContent = [
+            "initData: " + (s.initDataParsed ? "ready" : "pending") + " | items:" + itemsCount + " ages:" + agesCount,
+            "healer: "   + (h.enabled ? "on" : "off") + " | heals:" + (h.healCount || 0) + " shame:" + (player.shameCount || 0),
+            "lastHeal: " + lastHeal
+        ].join("\n");
+    }
+
     function unmount() {
         if (!state.mounted) return;
+        if (state._debugInterval) {
+            root.clearInterval(state._debugInterval);
+            state._debugInterval = null;
+        }
+        state._debugInfoEl = null;
         const el = state.panel;
         if (el && el.parentNode) el.parentNode.removeChild(el);
         state.panel = null;
