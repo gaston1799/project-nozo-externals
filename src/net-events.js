@@ -112,6 +112,7 @@
         for (let i = 0; i < list.length; i++) {
             const p = list[i];
             if (!p) continue;
+            if (p.alive === false) continue;
             if (mySid != null && p.sid === mySid) continue;
             near.push(p);
             if (pTeam == null || p.team == null || p.team !== pTeam) enemy.push(p);
@@ -264,6 +265,7 @@
         }
 
         _rebuildNearEnemy();
+        _pruneDeadPlayers();
     }
 
     // H: loadGameObject — flat array, 8 values per object:
@@ -449,7 +451,6 @@
 
     // --- observe stubs for unimplemented high-risk handlers -------------------
     // These record counters and log on first occurrence + every 100th hit.
-    // Full implementation deferred; Phase 13 goal is calibration via live logs.
 
     function _makeObserver(type) {
         return function _observed() {
@@ -468,6 +469,91 @@
         };
     }
 
+    // --- promoted handlers ---------------------------------------------------
+
+    // X: addProjectile — bounded map keyed by id; max 200 entries.
+    function _handlerX() {
+        const s = Nozo.state;
+        if (!s) return;
+        if (!s.projectiles || typeof s.projectiles !== "object") s.projectiles = {};
+        const id = arguments[0];
+        if (id == null) return;
+        s.projectiles[id] = {
+            id:       id,
+            ownerSid: arguments.length > 1 ? arguments[1] : null,
+            type:     arguments.length > 2 ? arguments[2] : null,
+            x:        arguments.length > 3 && typeof arguments[3] === "number" ? arguments[3] : 0,
+            y:        arguments.length > 4 && typeof arguments[4] === "number" ? arguments[4] : 0,
+            dir:      arguments.length > 5 && typeof arguments[5] === "number" ? arguments[5] : 0,
+            t:        Date.now()
+        };
+        const keys = Object.keys(s.projectiles);
+        if (keys.length > 200) {
+            keys.sort(function (a, b) { return (s.projectiles[a].t || 0) - (s.projectiles[b].t || 0); });
+            for (let i = 0; i < keys.length - 200; i++) delete s.projectiles[keys[i]];
+        }
+        if (!s.netEventCounters) s.netEventCounters = {};
+        s.netEventCounters.X = (s.netEventCounters.X || 0) + 1;
+    }
+
+    // Y: remProjectile — remove by id.
+    function _handlerY() {
+        const s = Nozo.state;
+        if (!s || !s.projectiles) return;
+        const id = arguments[0];
+        if (id != null) delete s.projectiles[id];
+        if (!s.netEventCounters) s.netEventCounters = {};
+        s.netEventCounters.Y = (s.netEventCounters.Y || 0) + 1;
+    }
+
+    // K: gatherAnimation — lightweight state record with bounded history.
+    const _gatherHistory = [];
+    function _handlerK() {
+        const s = Nozo.state;
+        if (!s) return;
+        if (!s.netEventCounters) s.netEventCounters = {};
+        const prev = s.netEventCounters.K || 0;
+        s.netEventCounters.K = prev + 1;
+        const entry = {
+            tick:   s.tick || 0,
+            time:   Date.now(),
+            argc:   arguments.length,
+            source: arguments.length > 0 ? arguments[0] : null
+        };
+        _gatherHistory.push(entry);
+        if (_gatherHistory.length > 20) _gatherHistory.shift();
+        s.lastGatherAnim = entry;
+        if (prev === 0 || prev % 100 === 0) {
+            if (Nozo.log) Nozo.log("net:gatherAnim:K", { count: prev + 1, entry: entry });
+        }
+    }
+
+    // --- dead player pruning -------------------------------------------------
+
+    const _DEAD_GRACE_MS = 30000;
+
+    function _pruneDeadPlayers() {
+        const s = Nozo.state;
+        if (!s || !Array.isArray(s.players)) return;
+        const cutoff = Date.now() - _DEAD_GRACE_MS;
+        for (let i = s.players.length - 1; i >= 0; i--) {
+            const p = s.players[i];
+            if (p && p.alive === false && p.lastSeenAt != null && p.lastSeenAt < cutoff) {
+                s.players.splice(i, 1);
+            }
+        }
+    }
+
+    function getAlivePlayers() {
+        const s = Nozo.state;
+        if (!s || !Array.isArray(s.players)) return [];
+        const out = [];
+        for (let i = 0; i < s.players.length; i++) {
+            if (s.players[i] && s.players[i].alive !== false) out.push(s.players[i]);
+        }
+        return out;
+    }
+
     // Auto-register default handlers.
     registerMany({
         A: _handlerInitData,
@@ -479,7 +565,7 @@
         H: _handlerH,
         I: _makeObserver("I"),
         J: _makeObserver("J"),
-        K: _makeObserver("K"),
+        K: _handlerK,
         L: _makeObserver("L"),
         M: _makeObserver("M"),
         N: _handlerN,
@@ -491,8 +577,8 @@
         T: _handlerT,
         U: _handlerU,
         V: _handlerV,
-        X: _makeObserver("X"),
-        Y: _makeObserver("Y"),
+        X: _handlerX,
+        Y: _handlerY,
         5: _makeObserver("5"),
         6: _makeObserver("6"),
         7: _handler7,
@@ -505,11 +591,14 @@
     function netEventsCallable(type, data, ctx) {
         return dispatch(type, data, ctx);
     }
-    netEventsCallable.handlers     = handlers;
-    netEventsCallable.setHandlers  = setHandlers;
-    netEventsCallable.dispatch     = dispatch;
-    netEventsCallable.register     = register;
-    netEventsCallable.registerMany = registerMany;
+    netEventsCallable.handlers          = handlers;
+    netEventsCallable.setHandlers       = setHandlers;
+    netEventsCallable.dispatch          = dispatch;
+    netEventsCallable.register          = register;
+    netEventsCallable.registerMany      = registerMany;
+    netEventsCallable.getAlivePlayers   = getAlivePlayers;
+    netEventsCallable.pruneDeadPlayers  = _pruneDeadPlayers;
+    netEventsCallable.gatherHistory     = _gatherHistory;
 
     Nozo.netEvents = netEventsCallable;
     Nozo.state = Nozo.state || {};

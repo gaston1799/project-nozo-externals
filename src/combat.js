@@ -8,6 +8,21 @@
     const maxHistory = (Nozo.constants && Nozo.constants.MAX_LOG) || 64;
     const _history = [];
 
+    // Approximate weapon ranges in world units. Index = weaponIndex from player updates.
+    // Values are intentionally conservative; actual ranges vary by weapon variant.
+    const _weaponRanges = {
+        0: 35, 1: 35, 2: 110, 3: 140, 4: 170,
+        5: 130, 6: 140, 7: 160, 8: 180, 9: 130,
+        10: 115, 11: 130, 12: 130, 13: 130, 14: 130
+    };
+
+    function getWeaponRange(weaponIndex) {
+        if (weaponIndex != null && _weaponRanges[weaponIndex] != null) {
+            return _weaponRanges[weaponIndex];
+        }
+        return 35;
+    }
+
     function _record(kind, detail) {
         _history.push({ kind: kind, detail: detail || null, t: Date.now() });
         if (_history.length > maxHistory) _history.shift();
@@ -28,8 +43,21 @@
         lastGatherTag:   null,
         lastGatherTick:  null,
         lastGatherTime:  null,
-        lastBlockReason: null
+        lastBlockReason: null,
+        weaponRange:     35,
+        aimAngle:        null,
+        aimSource:       null,
+        reloadGate:      null,
+        lastSwingAt:     null
     };
+
+    function updateWeaponRange(context) {
+        const ctx = context || {};
+        const player = ctx.player || (Nozo.state && Nozo.state.player) || null;
+        if (!player) return;
+        const wi = player.weaponIndex;
+        if (wi != null) state.weaponRange = getWeaponRange(wi);
+    }
 
     // --- aim lock --------------------------------------------------------
 
@@ -228,6 +256,8 @@
         state.lastDirTag = tag || null;
         state.lastDirTick = _currentTick();
         state.lastDirTime = Date.now();
+        state.aimAngle = angle;
+        state.aimSource = tag || null;
         return { ok: true, sent: !!sent };
     }
 
@@ -272,6 +302,8 @@
         const detail = { angle: angle, tag: tag || null, dirSent: dirResult.sent, gatherSent: gatherResult.ok };
         _record("swing:sent", detail);
         state.lastBlockReason = null;
+        state.lastSwingAt = Date.now();
+        state.reloadGate = null;
         if (Nozo.log) Nozo.log("combat:swing:sent", detail);
         return { ok: true, dir: dirResult, gather: gatherResult };
     }
@@ -326,19 +358,21 @@
     }
 
     const combat = {
-        state:         state,
-        setAimLock:    setAimLock,
-        clearAimLock:  clearAimLock,
-        getActiveAim:  getActiveAim,
-        calculateAim:  calculateAim,
-        canSwing:      canSwing,
-        sendDirection: sendDirection,
-        sendGather:    sendGather,
-        swingAt:       swingAt,
-        manualSwing:   manualSwing,
-        wireInput:     wireInput,
-        getHistory:    getHistory,
-        getDebugState: getDebugState
+        state:              state,
+        setAimLock:         setAimLock,
+        clearAimLock:       clearAimLock,
+        getActiveAim:       getActiveAim,
+        calculateAim:       calculateAim,
+        canSwing:           canSwing,
+        sendDirection:      sendDirection,
+        sendGather:         sendGather,
+        swingAt:            swingAt,
+        manualSwing:        manualSwing,
+        wireInput:          wireInput,
+        getHistory:         getHistory,
+        getDebugState:      getDebugState,
+        getWeaponRange:     getWeaponRange,
+        updateWeaponRange:  updateWeaponRange
     };
 
     Nozo.combat = combat;

@@ -17,6 +17,34 @@
     };
 
     let _resizeListener = null;
+    let _lastScaleCheck = 0;
+
+    function _updateScale() {
+        const now = Date.now();
+        if (now - _lastScaleCheck < 3000) return;
+        _lastScaleCheck = now;
+        const dpr = (root.devicePixelRatio) || 1;
+        // Prefer a known game camera scale global if available.
+        const gameScale = (root.game && typeof root.game.scale === "number" && root.game.scale > 0)
+            ? root.game.scale
+            : (root.camera && typeof root.camera.scale === "number" && root.camera.scale > 0)
+            ? root.camera.scale
+            : 0;
+        let newScale;
+        if (gameScale > 0) {
+            newScale = Math.max(0.1, Math.min(8, gameScale));
+        } else {
+            // Heuristic: moomoo.io shows ~1800 world units along the short axis at default zoom.
+            const vMin = Math.min(root.innerWidth || 800, root.innerHeight || 600);
+            newScale = Math.max(0.25, Math.min(4, (vMin / 1800) * dpr));
+        }
+        if (Math.abs(newScale - state.scale) > 0.01) {
+            state.scale = newScale;
+            if (Nozo.log) Nozo.log("render:scale:updated", {
+                scale: newScale, dpr: dpr, source: gameScale > 0 ? "game.scale" : "viewport"
+            });
+        }
+    }
 
     function setEnabled(flag) {
         state.enabled = !!flag;
@@ -199,6 +227,7 @@
     function draw(gameCtx) {
         if (!state.enabled) return;
         if (!state.attached || !state.context || !state.canvas) return;
+        _updateScale();
 
         const ctx = state.context;
         const canvas = state.canvas;
@@ -268,7 +297,12 @@
             const hudLines = [];
             hudLines.push("tick:" + ((Nozo.state && Nozo.state.tick) || 0));
             if (combatState.aimSource) hudLines.push("aim:" + combatState.aimSource);
-            if (combatState.reloadGate != null) {
+            if (combatState.lastSwingAt != null) {
+                const baseReload = (Nozo.constants && Nozo.constants.RELOAD_TICK) || 400;
+                const elapsed = Date.now() - combatState.lastSwingAt;
+                const remaining = Math.max(0, baseReload - elapsed);
+                if (remaining > 0) hudLines.push("reload:" + remaining.toFixed(0) + "ms");
+            } else if (combatState.reloadGate != null) {
                 const rg = typeof combatState.reloadGate === "number"
                     ? combatState.reloadGate.toFixed(0)
                     : combatState.reloadGate;
