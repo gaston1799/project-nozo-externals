@@ -464,6 +464,14 @@
 
     const autoBreak = {
         state:         state,
+        calc: {
+            dist: _dist,
+            dir: _dir,
+            angleDist: _angleDist,
+            objectsHit: _objectsHit,
+            scoreAim: _scoreAim,
+            pickBestAim: _pickBestAim
+        },
         scan:          scan,
         setAim:        setAim,
         clearAim:      clearAim,

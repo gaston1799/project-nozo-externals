@@ -104,6 +104,15 @@
         return e;
     }
 
+    function _pickViaAutoBreakCalc(player, checkList, targets) {
+        const calc = Nozo.autoBreak && Nozo.autoBreak.calc;
+        if (!calc || typeof calc.pickBestAim !== "function") return null;
+        if (!Array.isArray(targets) || !targets.length) return null;
+        const out = calc.pickBestAim(targets, player, checkList, null, 1);
+        if (!out || typeof out.aim !== "number" || !isFinite(out.aim)) return null;
+        return out;
+    }
+
     // --- live state ----------------------------------------------------------
 
     const state = {
@@ -202,13 +211,24 @@
 
         if (inTrap) {
             const enemy = _resolveEnemy(ctx);
-            if (enemy) {
-                const a = _dir(player, enemy);
-                if (a !== null) { aimAngle = a; aimTarget = enemy; aimReason = "enemy.whileInTrap"; }
-            }
-            if (aimAngle === null) {
-                const a = _dir(player, closestTrap);
-                if (a !== null) { aimAngle = a; aimTarget = closestTrap; aimReason = "trap.direct"; }
+            const preferredTargets = [];
+            if (enemy) preferredTargets.push(enemy);
+            if (closestTrap) preferredTargets.push(closestTrap);
+
+            const picked = _pickViaAutoBreakCalc(player, checkList, preferredTargets);
+            if (picked) {
+                aimAngle = picked.aim;
+                aimTarget = picked.target || preferredTargets[0] || null;
+                aimReason = "calc.inTrap";
+            } else {
+                if (enemy) {
+                    const a = _dir(player, enemy);
+                    if (a !== null) { aimAngle = a; aimTarget = enemy; aimReason = "enemy.whileInTrap"; }
+                }
+                if (aimAngle === null) {
+                    const a = _dir(player, closestTrap);
+                    if (a !== null) { aimAngle = a; aimTarget = closestTrap; aimReason = "trap.direct"; }
+                }
             }
         } else {
             // Not in a trap, but check for nearby threatening enemy traps so we can
@@ -227,12 +247,23 @@
             }
             if (nearestThreat) {
                 const enemy = _resolveEnemy(ctx);
-                const target = enemy || nearestThreat;
-                const a = _dir(player, target);
-                if (a !== null) {
-                    aimAngle = a;
-                    aimTarget = target;
-                    aimReason = "trap.nearThreat";
+                const preferredTargets = [];
+                if (enemy) preferredTargets.push(enemy);
+                preferredTargets.push(nearestThreat);
+
+                const picked = _pickViaAutoBreakCalc(player, checkList, preferredTargets);
+                if (picked) {
+                    aimAngle = picked.aim;
+                    aimTarget = picked.target || preferredTargets[0] || null;
+                    aimReason = "calc.nearThreat";
+                } else {
+                    const target = enemy || nearestThreat;
+                    const a = _dir(player, target);
+                    if (a !== null) {
+                        aimAngle = a;
+                        aimTarget = target;
+                        aimReason = "trap.nearThreat";
+                    }
                 }
             }
         }
