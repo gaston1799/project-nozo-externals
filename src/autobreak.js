@@ -118,6 +118,7 @@
     // --- live state ----------------------------------------------------------
 
     const state = {
+        enabled:    true,
         active:     false,
         aim:        null,
         target:     null,
@@ -125,6 +126,12 @@
         lastReason: null,
         debug:      null
     };
+
+    function setEnabled(flag) {
+        state.enabled = !!flag;
+        if (!state.enabled) clearAim("disabled");
+        if (Nozo.log) Nozo.log("autoBreak:setEnabled", { enabled: state.enabled });
+    }
 
     let _aimEntry = null;
 
@@ -283,6 +290,12 @@
     function scan(context) {
         const ctx = context || {};
         const tick = _currentTick();
+
+        if (!state.enabled) {
+            _record("autoBreak:scan:skip", { reason: "disabled" });
+            return { ok: false, aim: null, target: null, reason: "disabled", debug: { tick: tick } };
+        }
+
         const player = _resolvePlayer(ctx);
         const dbg = { tick: tick, sources: [], level: -1, candidates: 0 };
 
@@ -464,6 +477,7 @@
 
     const autoBreak = {
         state:         state,
+        setEnabled:    setEnabled,
         calc: {
             dist: _dist,
             dir: _dir,

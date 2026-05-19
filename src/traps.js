@@ -116,6 +116,7 @@
     // --- live state ----------------------------------------------------------
 
     const state = {
+        enabled:    true,
         inTrap:     false,
         aim:        null,
         target:     null,
@@ -123,6 +124,12 @@
         lastReason: null,
         debug:      null
     };
+
+    function setEnabled(flag) {
+        state.enabled = !!flag;
+        if (!state.enabled) clearAim("disabled");
+        if (Nozo.log) Nozo.log("traps:setEnabled", { enabled: state.enabled });
+    }
 
     let _aimEntry = null;
 
@@ -161,6 +168,12 @@
     function scan(context) {
         const ctx = context || {};
         const tick = _currentTick();
+
+        if (!state.enabled) {
+            _record("traps:scan:skip", { reason: "disabled" });
+            return { ok: false, aim: null, target: null, reason: "disabled", debug: { tick: tick } };
+        }
+
         const player = _resolvePlayer(ctx);
         const dbg = { tick: tick, sources: [], objectsChecked: 0, inTrap: false };
 
@@ -319,6 +332,7 @@
 
     const traps = {
         state:         state,
+        setEnabled:    setEnabled,
         scan:          scan,
         setAim:        setAim,
         clearAim:      clearAim,

@@ -19,6 +19,7 @@
 
     // Movement state — separate from combat/traps/autoBreak state.
     const state = {
+        enabled:       false,  // off by default; toggled via html menu
         target:        null,   // { x, y } world position
         path:          null,   // array of { x, y } waypoints
         lastMoveDir:   null,   // last angle sent (radians)
@@ -28,6 +29,11 @@
         strategy:      "direct", // active strategy name
         active:        false   // true while a target or path is set
     };
+
+    function setEnabled(flag) {
+        state.enabled = !!flag;
+        if (Nozo.log) Nozo.log("movement:setEnabled", { enabled: state.enabled });
+    }
 
     // --- strategy registry -----------------------------------------------
 
@@ -174,6 +180,11 @@
     function step(context) {
         const ctx = context || {};
 
+        if (!state.enabled) {
+            state.blockedReason = "disabled";
+            return { ok: false, reason: "disabled" };
+        }
+
         const gate = canMove(ctx);
         if (!gate.ok) {
             state.blockedReason = gate.reason;
@@ -211,6 +222,7 @@
 
     const movement = {
         state:         state,
+        setEnabled:    setEnabled,
         setTarget:     setTarget,
         clearTarget:   clearTarget,
         setPath:       setPath,
