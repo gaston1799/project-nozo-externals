@@ -16,6 +16,8 @@
         lastDrawTick: null
     };
 
+    let _resizeListener = null;
+
     function setEnabled(flag) {
         state.enabled = !!flag;
         if (Nozo.log) Nozo.log("render:setEnabled", { enabled: state.enabled });
@@ -40,10 +42,11 @@
             return null;
         }
 
-        root.addEventListener("resize", function () {
+        _resizeListener = function onResize() {
             el.width = root.innerWidth || el.width;
             el.height = root.innerHeight || el.height;
-        });
+        };
+        root.addEventListener("resize", _resizeListener);
 
         return el;
     }
@@ -74,6 +77,10 @@
     }
 
     function detach() {
+        if (_resizeListener) {
+            try { root.removeEventListener("resize", _resizeListener); } catch (e) {}
+            _resizeListener = null;
+        }
         const el = state.canvas;
         if (el && el.parentNode && el.id === "nozoRenderOverlay") {
             el.parentNode.removeChild(el);

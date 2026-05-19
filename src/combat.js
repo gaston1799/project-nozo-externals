@@ -208,7 +208,7 @@
     // --- packet senders --------------------------------------------------
     // sendDirection is the ONLY D-packet sender in this pipeline.
     // sendGather is the ONLY auto-gather swing sender.
-    // Direct F attack packets are not supported here; see Nozo.packet.sendAttackPacketUnsafe (opt-in only).
+    // Direct F attack packets are intentionally unsupported in this pipeline.
 
     function sendDirection(angle, tag, context) {
         if (typeof angle !== "number" || !isFinite(angle)) {

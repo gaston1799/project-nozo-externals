@@ -94,6 +94,10 @@
         const doc = root.document;
         if (!doc || !doc.body) return false;
 
+        // Remove any stale panel left in the DOM (e.g. after script re-injection).
+        const stale = doc.getElementById("nozoNextHtmlPanel");
+        if (stale && stale.parentNode) stale.parentNode.removeChild(stale);
+
         Object.keys(_DEFAULTS).forEach(function (key) {
             const stored = _storageGet(key);
             if (stored !== null && stored !== undefined) state.settings[key] = stored;

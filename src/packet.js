@@ -63,11 +63,6 @@
             return net.sendPacket("K", 1, 1);
         },
 
-        sendAttackPacketUnsafe: function sendAttackPacketUnsafe() {
-            // Opt-in stub reserved for Phase 6. Must not be called by any code path.
-            return false;
-        },
-
         getHistory: function getHistory() {
             return history.slice();
         }
