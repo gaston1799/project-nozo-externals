@@ -13,6 +13,7 @@
         "render.enabled":    true,
         "traps.enabled":     true,
         "autobreak.enabled": true,
+        "healer.enabled":    true,
         "movement.enabled":  false,
         "debug.enabled":     true
     };
@@ -88,6 +89,10 @@
 
     function _applyMovement(val) {
         if (Nozo.movement && typeof Nozo.movement.setEnabled === "function") Nozo.movement.setEnabled(val);
+    }
+
+    function _applyHealer(val) {
+        if (Nozo.healer && typeof Nozo.healer.setEnabled === "function") Nozo.healer.setEnabled(val);
     }
 
     function _applyDebug(val) {
@@ -195,6 +200,7 @@
         body.appendChild(_makeSection(doc, "Combat"));
         body.appendChild(_makeRow(doc, "Trap System", "traps.enabled", _applyTraps));
         body.appendChild(_makeRow(doc, "AutoBreak", "autobreak.enabled", _applyAutoBreak));
+        body.appendChild(_makeRow(doc, "Healer", "healer.enabled", _applyHealer));
 
         // --- Movement section ---
         body.appendChild(_makeSection(doc, "Movement"));
@@ -214,6 +220,7 @@
         _applyRender(!!state.settings["render.enabled"]);
         _applyTraps(!!state.settings["traps.enabled"]);
         _applyAutoBreak(!!state.settings["autobreak.enabled"]);
+        _applyHealer(!!state.settings["healer.enabled"]);
         _applyMovement(!!state.settings["movement.enabled"]);
         _applyDebug(!!state.settings["debug.enabled"]);
 

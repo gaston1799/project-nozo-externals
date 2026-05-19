@@ -230,6 +230,9 @@
             }
             if (!p) { p = { sid: sid }; s.players.push(p); }
 
+            const _oldSkinIdx = p.skinIndex;
+            const _isSelf = (s.mySid != null && sid === s.mySid);
+
             if (model && typeof model.applyTupleUpdate === "function") {
                 model.applyTupleUpdate(p, data, i);
             } else {
@@ -248,6 +251,14 @@
                 p.iconIndex    = data[i + 11];
                 p.zIndex       = data[i + 12];
                 p.visible      = true;
+            }
+
+            // Shame-clear: self-player's skin changed from 45 (shame) to another.
+            // Mirrors the healer() call at the skin-transition branch in the original update loop.
+            if (_isSelf && _oldSkinIdx === 45 && p.skinIndex !== 45) {
+                if (Nozo.healer && typeof Nozo.healer.onShameClear === "function") {
+                    Nozo.healer.onShameClear();
+                }
             }
         }
 
@@ -349,6 +360,7 @@
     }
 
     // O: updateHealth — updates health for any player found by SID.
+    // Notifies healer when the local player takes damage.
     function _handlerO(sid, value) {
         const s = Nozo.state;
         if (!s) return;
@@ -357,8 +369,14 @@
         for (let i = 0; i < s.players.length; i++) {
             const p = s.players[i];
             if (p && p.sid === sid) {
-                p.oldHealth = p.health;
+                const old = p.health;
+                p.oldHealth = old;
                 p.health = value;
+                if (Nozo.healer && typeof Nozo.healer.onHealthUpdate === "function") {
+                    if (s.mySid != null && sid === s.mySid) {
+                        Nozo.healer.onHealthUpdate(sid, value, old);
+                    }
+                }
                 return;
             }
         }

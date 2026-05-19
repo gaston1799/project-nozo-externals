@@ -63,6 +63,28 @@
             return net.sendPacket("K", 1, 1);
         },
 
+        // sendSelectItem: selects a build/weapon item by index.
+        // isPlace=false → select to build; isPlace=true → select as weapon (re-equip).
+        // Mirrors selectToBuild / selectWeapon in original code (packet "z").
+        sendSelectItem: function sendSelectItem(index, isPlace) {
+            const data = [index, isPlace ? 1 : 0];
+            _record("z", data, "selectItem");
+            if (Nozo.log) Nozo.log("packet:z", { index: index, isPlace: !!isPlace, t: Date.now() });
+            return net.sendPacketData("z", data);
+        },
+
+        // sendPlace: sends a placement/attack packet at `angle`.
+        // type=1 corresponds to the place/attack type used by sendAtck(1, rad).
+        // Mirrors packet("F", type, angle, 1) in original code.
+        sendPlace: function sendPlace(type, angle) {
+            const numericAngle = Number(angle);
+            if (!isFinite(numericAngle)) return false;
+            const data = [type, numericAngle, 1];
+            _record("F", data, "place");
+            if (Nozo.log) Nozo.log("packet:F", { type: type, angle: numericAngle, t: Date.now() });
+            return net.sendPacketData("F", data);
+        },
+
         getHistory: function getHistory() {
             return history.slice();
         }
