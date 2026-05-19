@@ -447,6 +447,27 @@
         if (s.player) s.player.heldItems = items;
     }
 
+    // --- observe stubs for unimplemented high-risk handlers -------------------
+    // These record counters and log on first occurrence + every 100th hit.
+    // Full implementation deferred; Phase 13 goal is calibration via live logs.
+
+    function _makeObserver(type) {
+        return function _observed() {
+            const s = Nozo.state;
+            if (!s) return;
+            if (!s.netEventCounters) s.netEventCounters = {};
+            const prev = s.netEventCounters[type] || 0;
+            s.netEventCounters[type] = prev + 1;
+            if (prev === 0 || prev % 100 === 0) {
+                if (Nozo.log) Nozo.log("net:observe:" + type, {
+                    count: prev + 1,
+                    argc: arguments.length,
+                    sample: Array.prototype.slice.call(arguments, 0, 4)
+                });
+            }
+        };
+    }
+
     // Auto-register default handlers.
     registerMany({
         A: _handlerInitData,
@@ -456,6 +477,11 @@
         a: _handlerA,
         G: _handlerG,
         H: _handlerH,
+        I: _makeObserver("I"),
+        J: _makeObserver("J"),
+        K: _makeObserver("K"),
+        L: _makeObserver("L"),
+        M: _makeObserver("M"),
         N: _handlerN,
         O: _handlerO,
         P: _handlerP,
@@ -465,7 +491,13 @@
         T: _handlerT,
         U: _handlerU,
         V: _handlerV,
-        7: _handler7
+        X: _makeObserver("X"),
+        Y: _makeObserver("Y"),
+        5: _makeObserver("5"),
+        6: _makeObserver("6"),
+        7: _handler7,
+        8: _makeObserver("8"),
+        9: _makeObserver("9")
     });
 
     // Callable facade: Nozo.netEvents(type, data[, ctx]) dispatches directly.

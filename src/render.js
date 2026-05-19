@@ -132,13 +132,33 @@
         ctx.restore();
     }
 
-    function _drawTargetMarker(ctx, sx, sy, color, radius) {
+    function _drawRangeRing(ctx, cx, cy, radius) {
+        if (!radius || radius <= 0) return;
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+        ctx.strokeStyle = "rgba(255,255,255,0.18)";
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 4]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
+    }
+
+    function _drawTargetMarker(ctx, sx, sy, color, radius, label) {
         ctx.save();
         ctx.beginPath();
         ctx.arc(sx, sy, radius || 10, 0, Math.PI * 2);
         ctx.strokeStyle = color || "rgba(255,80,0,0.9)";
         ctx.lineWidth = 2;
         ctx.stroke();
+        if (label) {
+            ctx.font = "10px monospace";
+            ctx.fillStyle = color || "rgba(255,80,0,0.9)";
+            ctx.textBaseline = "middle";
+            ctx.fillText(label, sx + (radius || 10) + 3, sy);
+            ctx.textBaseline = "alphabetic";
+        }
         ctx.restore();
     }
 
@@ -157,6 +177,22 @@
         ctx.setLineDash([6, 5]);
         ctx.stroke();
         ctx.setLineDash([]);
+        ctx.restore();
+    }
+
+    function _drawHudText(ctx, lines, cw, ch) {
+        if (!lines || !lines.length) return;
+        ctx.save();
+        ctx.font = "11px monospace";
+        ctx.textBaseline = "alphabetic";
+        const lineH = 14;
+        const startY = ch - lines.length * lineH - 8;
+        for (let i = 0; i < lines.length; i++) {
+            ctx.fillStyle = "rgba(0,0,0,0.5)";
+            ctx.fillText(lines[i], 9, startY + i * lineH + 1);
+            ctx.fillStyle = "rgba(160,255,160,0.9)";
+            ctx.fillText(lines[i], 8, startY + i * lineH);
+        }
         ctx.restore();
     }
 
@@ -183,7 +219,7 @@
             const cx = cw / 2;
             const cy = ch / 2;
 
-            // Aim direction arrow
+            // Aim direction arrow + attack range ring
             const combatState = (Nozo.state && Nozo.state.combat) || {};
             let aimAngle = typeof combatState.aimAngle === "number" && isFinite(combatState.aimAngle)
                 ? combatState.aimAngle
@@ -191,6 +227,10 @@
             if (aimAngle !== null) {
                 _drawAimArrow(ctx, cx, cy, aimAngle);
             }
+            const weaponRange = (typeof combatState.weaponRange === "number" && combatState.weaponRange > 0)
+                ? combatState.weaponRange * state.scale
+                : 35 * state.scale;
+            _drawRangeRing(ctx, cx, cy, weaponRange);
 
             // Traps target marker
             const trapsState = nCtx.traps || (Nozo.state && Nozo.state.traps) || {};
@@ -200,7 +240,7 @@
                 const ty = _px(t, "y");
                 if (tx !== null && ty !== null) {
                     const sp = _worldToScreen(tx, ty, px, py, cw, ch);
-                    _drawTargetMarker(ctx, sp.x, sp.y, "rgba(255,80,0,0.9)", 10);
+                    _drawTargetMarker(ctx, sp.x, sp.y, "rgba(255,80,0,0.9)", 10, "trap");
                 }
             }
 
@@ -212,17 +252,29 @@
                 const ty = _px(t, "y");
                 if (tx !== null && ty !== null) {
                     const sp = _worldToScreen(tx, ty, px, py, cw, ch);
-                    _drawTargetMarker(ctx, sp.x, sp.y, "rgba(0,180,255,0.9)", 12);
+                    _drawTargetMarker(ctx, sp.x, sp.y, "rgba(0,180,255,0.9)", 12, "break");
                 }
             }
 
-            // Movement path line
+            // Movement/trap path trace
             const movePath = state.debugPath
                 || (Nozo.state && Nozo.state.movement && Array.isArray(Nozo.state.movement.path)
                     ? Nozo.state.movement.path : null);
             if (movePath && movePath.length > 1) {
                 _drawPath(ctx, movePath, px, py, cw, ch);
             }
+
+            // HUD debug text (bottom-left)
+            const hudLines = [];
+            hudLines.push("tick:" + ((Nozo.state && Nozo.state.tick) || 0));
+            if (combatState.aimSource) hudLines.push("aim:" + combatState.aimSource);
+            if (combatState.reloadGate != null) {
+                const rg = typeof combatState.reloadGate === "number"
+                    ? combatState.reloadGate.toFixed(0)
+                    : combatState.reloadGate;
+                hudLines.push("reload:" + rg);
+            }
+            _drawHudText(ctx, hudLines, cw, ch);
 
             state.lastDrawTick = (Nozo.state && Nozo.state.tick) || 0;
         } catch (e) {
