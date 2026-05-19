@@ -17,21 +17,23 @@ npm run build
 
 ## @require order
 
-Add these to your userscript header in load order:
+Add these to your userscript header in load order (pin the commit hash — do not use `@main`):
 
 ```js
 // @require https://unpkg.com/gpu.js@2.16.0/dist/gpu-browser.min.js
-// @require https://cdn.jsdelivr.net/gh/gaston1799/project-nozo-externals@main/dist/vendor/easystar.min.js
-// @require https://cdn.jsdelivr.net/gh/gaston1799/project-nozo-externals@main/dist/vendor/msgpack.min.js
-// @require https://cdn.jsdelivr.net/gh/gaston1799/project-nozo-externals@main/dist/utils.min.js
-// @require https://cdn.jsdelivr.net/gh/gaston1799/project-nozo-externals@main/dist/constants.min.js
-// @require https://cdn.jsdelivr.net/gh/gaston1799/project-nozo-externals@main/dist/packet.min.js
-// @require https://cdn.jsdelivr.net/gh/gaston1799/project-nozo-externals@main/dist/input.min.js
-// @require https://cdn.jsdelivr.net/gh/gaston1799/project-nozo-externals@main/dist/combat.min.js
-// @require https://cdn.jsdelivr.net/gh/gaston1799/project-nozo-externals@main/dist/net-events.min.js
-// @require https://cdn.jsdelivr.net/gh/gaston1799/project-nozo-externals@main/dist/traps.min.js
-// @require https://cdn.jsdelivr.net/gh/gaston1799/project-nozo-externals@main/dist/autobreak.min.js
-// @require https://cdn.jsdelivr.net/gh/gaston1799/project-nozo-externals@main/dist/movement.min.js
+// @require https://cdn.jsdelivr.net/gh/gaston1799/project-nozo-externals@6af1bc5/dist/vendor/easystar.min.js
+// @require https://cdn.jsdelivr.net/gh/gaston1799/project-nozo-externals@6af1bc5/dist/vendor/msgpack.min.js
+// @require https://cdn.jsdelivr.net/gh/gaston1799/project-nozo-externals@6af1bc5/dist/utils.min.js
+// @require https://cdn.jsdelivr.net/gh/gaston1799/project-nozo-externals@6af1bc5/dist/constants.min.js
+// @require https://cdn.jsdelivr.net/gh/gaston1799/project-nozo-externals@6af1bc5/dist/packet.min.js
+// @require https://cdn.jsdelivr.net/gh/gaston1799/project-nozo-externals@6af1bc5/dist/input.min.js
+// @require https://cdn.jsdelivr.net/gh/gaston1799/project-nozo-externals@6af1bc5/dist/combat.min.js
+// @require https://cdn.jsdelivr.net/gh/gaston1799/project-nozo-externals@6af1bc5/dist/net-events.min.js
+// @require https://cdn.jsdelivr.net/gh/gaston1799/project-nozo-externals@6af1bc5/dist/traps.min.js
+// @require https://cdn.jsdelivr.net/gh/gaston1799/project-nozo-externals@6af1bc5/dist/autobreak.min.js
+// @require https://cdn.jsdelivr.net/gh/gaston1799/project-nozo-externals@6af1bc5/dist/movement.min.js
+// @require https://cdn.jsdelivr.net/gh/gaston1799/project-nozo-externals@6af1bc5/dist/render.min.js
+// @require https://cdn.jsdelivr.net/gh/gaston1799/project-nozo-externals@6af1bc5/dist/html.min.js
 ```
 
 ## Vendor files (`dist/vendor/`)
@@ -56,6 +58,8 @@ gpu.js is loaded from unpkg CDN directly (not vendored here).
 | `traps.min.js` | Built from `src/traps.js` | `unsafeWindow.NozoNext.traps` | 10 |
 | `autobreak.min.js` | Built from `src/autobreak.js` | `unsafeWindow.NozoNext.autoBreak` | 11 |
 | `movement.min.js` | Built from `src/movement.js` | `unsafeWindow.NozoNext.movement` | 12 |
+| `render.min.js` | Built from `src/render.js` | `unsafeWindow.NozoNext.render` | 13 |
+| `html.min.js` | Built from `src/html.js` | `unsafeWindow.NozoNext.html` | 14 |
 
 ## Globals
 
@@ -70,8 +74,44 @@ gpu.js is loaded from unpkg CDN directly (not vendored here).
 - `unsafeWindow.NozoNext.traps`
 - `unsafeWindow.NozoNext.autoBreak`
 - `unsafeWindow.NozoNext.movement`
+- `unsafeWindow.NozoNext.render`
+- `unsafeWindow.NozoNext.html`
 - `window.EasyStar` (vendor)
 - `window.msgpack` (vendor)
+
+## Lifecycle expectations (Phase 11)
+
+### WebSocket
+
+`Nozo.bridge.bindWsHook()` intercepts `new WebSocket(...)` exactly once. On each new
+connection:
+
+1. The previous WS's `message` listener is removed before the new WS is used.
+2. `Nozo.state.WS` and `Nozo.packet` socket reference are updated to the new WS.
+3. A `close` listener on the new WS clears `Nozo.state.WS` and the packet socket when
+   the connection closes, **only if** this WS is still the active one (not already replaced
+   by a reconnect).
+
+### Tick loop
+
+`Nozo.bridge.startTickLoop()` is idempotent — calling it more than once has no effect.
+`Nozo.bridge.stopTickLoop()` clears the interval and resets `events.wired`. The tick
+runs every 50 ms and drives traps, autoBreak, movement, and render in order.
+
+### Render
+
+`Nozo.render.attach(canvas)` is idempotent — it calls `detach()` first if already
+attached. If `canvas` is null, an overlay `<canvas>` is inserted before `#gameCanvas`.
+The resize listener added by the overlay is tracked and removed by `detach()`.
+The bridge tick re-tries `attach()` every 20 ticks (~1 s) while `render.state.attached`
+is false, so canvas replacement or late DOM availability is handled automatically.
+
+### HTML panel
+
+`Nozo.html.mount()` is idempotent. Before inserting a new panel it removes any stale
+`#nozoNextHtmlPanel` element left in the DOM (e.g. after script re-injection). The panel
+is visible by default (`html.enabled` defaults to `true`). `unmount()` removes the panel
+and resets internal state cleanly.
 
 ## `Nozo.netEvents` API (`net-events.min.js`)
 
