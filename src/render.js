@@ -208,6 +208,37 @@
         ctx.restore();
     }
 
+    function _drawKbiAnimations(ctx, px, py, cw, ch) {
+        const kbi = Nozo.kbSimulator || null;
+        if (!kbi || !Array.isArray(kbi.animations)) return;
+        if (kbi.state && kbi.state.showRender === false) return;
+        const now = Date.now();
+        for (let i = kbi.animations.length - 1; i >= 0; i--) {
+            const anim = kbi.animations[i];
+            if (!anim) { kbi.animations.splice(i, 1); continue; }
+            const max = typeof anim.maxDuration === "number" ? anim.maxDuration : 250;
+            const createdAt = typeof anim.createdAt === "number" ? anim.createdAt : (now - ((anim.duration || max)));
+            const age = now - createdAt;
+            if (age >= max) { kbi.animations.splice(i, 1); continue; }
+            const alpha = Math.max(0.1, 1 - (age / max));
+            const path = Array.isArray(anim.path) ? anim.path : null;
+            if (!path || path.length < 2) continue;
+
+            const first = _worldToScreen(path[0].x, path[0].y, px, py, cw, ch);
+            ctx.save();
+            ctx.beginPath();
+            ctx.moveTo(first.x, first.y);
+            for (let p = 1; p < path.length; p++) {
+                const pt = _worldToScreen(path[p].x, path[p].y, px, py, cw, ch);
+                ctx.lineTo(pt.x, pt.y);
+            }
+            ctx.strokeStyle = "rgba(255,80,80," + alpha.toFixed(3) + ")";
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            ctx.restore();
+        }
+    }
+
     function _drawHudText(ctx, lines, cw, ch) {
         if (!lines || !lines.length) return;
         ctx.save();
@@ -292,6 +323,8 @@
             if (movePath && movePath.length > 1) {
                 _drawPath(ctx, movePath, px, py, cw, ch);
             }
+
+            _drawKbiAnimations(ctx, px, py, cw, ch);
 
             // HUD debug text (bottom-left)
             const hudLines = [];

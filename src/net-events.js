@@ -123,14 +123,12 @@
 
     function _removeObjectBySid(sid) {
         if (sid == null) return;
-        _ensureArrays();
-        const s = Nozo.state;
-        for (let i = s.gameObjects.length - 1; i >= 0; i--) {
-            if (s.gameObjects[i] && s.gameObjects[i].sid === sid) { s.gameObjects.splice(i, 1); break; }
+        const om = Nozo.objectManager;
+        if (!om || typeof om.remove !== "function") {
+            if (Nozo.log) Nozo.log("error:net:_removeObjectBySid:noObjectManager", { sid: sid });
+            return;
         }
-        for (let i = s.liztobj.length - 1; i >= 0; i--) {
-            if (s.liztobj[i] && s.liztobj[i].sid === sid) { s.liztobj.splice(i, 1); break; }
-        }
+        om.remove(sid);
     }
 
     // --- default handlers -----------------------------------------------
@@ -165,20 +163,13 @@
         if (!s) return;
 
         const model = Nozo.playerModel || null;
-        const sid = data[1];
-        let p = model && typeof model.ensurePlayer === "function"
-            ? model.ensurePlayer(s, sid)
-            : null;
-        if (!p) {
-            if (!Array.isArray(s.players)) s.players = [];
-            for (let i = 0; i < s.players.length; i++) {
-                if (s.players[i] && s.players[i].sid === sid) { p = s.players[i]; break; }
-            }
-            if (!p) {
-                p = { sid: sid };
-                s.players.push(p);
-            }
+        if (!model || typeof model.ensurePlayer !== "function") {
+            if (Nozo.log) Nozo.log("error:net:_handlerD:noPlayerModel", { data0: data[0], sid: data[1] });
+            return;
         }
+        const sid = data[1];
+        const p = model.ensurePlayer(s, sid);
+        if (!p) return;
 
         p.id = data[0];
         p.sid = sid;
@@ -211,47 +202,26 @@
         if (!Array.isArray(data)) return;
         const s = Nozo.state;
         if (!s) return;
+        const model = Nozo.playerModel || null;
+        if (!model || typeof model.ensurePlayer !== "function" || typeof model.applyTupleUpdate !== "function") {
+            if (Nozo.log) Nozo.log("error:net:_handlerA:noPlayerModel", { tupleLen: data.length });
+            return;
+        }
         s.playersRaw = data;
         if (!Array.isArray(s.players)) s.players = [];
-        const model = Nozo.playerModel || null;
 
         const seenSids = {};
         for (let i = 0; i + 13 <= data.length; i += 13) {
             const sid = data[i];
             if (sid == null) continue;
             seenSids[sid] = true;
-            let p = model && typeof model.ensurePlayer === "function"
-                ? model.ensurePlayer(s, sid)
-                : null;
-            if (!p) {
-                for (let j = 0; j < s.players.length; j++) {
-                    if (s.players[j] && s.players[j].sid === sid) { p = s.players[j]; break; }
-                }
-            }
-            if (!p) { p = { sid: sid }; s.players.push(p); }
+            const p = model.ensurePlayer(s, sid);
+            if (!p) continue;
 
             const _oldSkinIdx = p.skinIndex;
             const _isSelf = (s.mySid != null && sid === s.mySid);
 
-            if (model && typeof model.applyTupleUpdate === "function") {
-                model.applyTupleUpdate(p, data, i);
-            } else {
-                p.x            = data[i + 1];
-                p.y            = data[i + 2];
-                p.x2           = data[i + 1];
-                p.y2           = data[i + 2];
-                p.dir          = data[i + 3];
-                p.buildIndex   = data[i + 4];
-                p.weaponIndex  = data[i + 5];
-                p.weaponVariant = data[i + 6];
-                p.team         = data[i + 7];
-                p.isLeader     = data[i + 8];
-                p.skinIndex    = data[i + 9];
-                p.tailIndex    = data[i + 10];
-                p.iconIndex    = data[i + 11];
-                p.zIndex       = data[i + 12];
-                p.visible      = true;
-            }
+            model.applyTupleUpdate(p, data, i);
 
             // Shame-clear: self-player's skin changed from 45 (shame) to another.
             // Mirrors the healer() call at the skin-transition branch in the original update loop.
@@ -284,31 +254,25 @@
     // Upserts into state.gameObjects; existing entries for the same sid are replaced.
     function _handlerH(data) {
         if (!Array.isArray(data)) return;
+        const om = Nozo.objectManager || null;
+        if (!om || typeof om.decorateAndUpsert !== "function") {
+            if (Nozo.log) Nozo.log("error:net:_handlerH:noObjectManager", { tupleLen: data.length });
+            return;
+        }
         _ensureArrays();
-        const s = Nozo.state;
         for (let i = 0; i + 8 <= data.length; i += 8) {
             const sid = data[i];
             if (sid == null) continue;
-            const obj = {
-                sid:       sid,
+            const rawFields = {
                 x:         data[i + 1],
                 y:         data[i + 2],
                 dir:       data[i + 3],
                 scale:     data[i + 4],
                 type:      data[i + 5],
                 dataIndex: data[i + 6],
-                ownerSid:  data[i + 7],
-                active:    true
+                ownerSid:  data[i + 7]
             };
-            let found = false;
-            for (let j = 0; j < s.gameObjects.length; j++) {
-                if (s.gameObjects[j] && s.gameObjects[j].sid === sid) {
-                    s.gameObjects[j] = obj;
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) s.gameObjects.push(obj);
+            om.decorateAndUpsert(sid, rawFields);
         }
     }
 
@@ -317,23 +281,15 @@
         _removeObjectBySid(sid);
     }
 
-    // R: killObjects — legacy form: remove all objects owned by player ownerSid.
-    //   Accepts an array of individual object SIDs as well (for flexibility).
-    function _handlerR(ownerSidOrArray) {
-        if (ownerSidOrArray == null) return;
-        _ensureArrays();
-        const s = Nozo.state;
-        if (Array.isArray(ownerSidOrArray)) {
-            for (let i = 0; i < ownerSidOrArray.length; i++) _removeObjectBySid(ownerSidOrArray[i]);
-        } else {
-            const ownerSid = ownerSidOrArray;
-            for (let i = s.gameObjects.length - 1; i >= 0; i--) {
-                if (s.gameObjects[i] && s.gameObjects[i].ownerSid === ownerSid) s.gameObjects.splice(i, 1);
-            }
-            for (let i = s.liztobj.length - 1; i >= 0; i--) {
-                if (s.liztobj[i] && s.liztobj[i].ownerSid === ownerSid) s.liztobj.splice(i, 1);
-            }
+    // R: killObjects(ownerSid) — remove all objects owned by player ownerSid.
+    function _handlerR(ownerSid) {
+        if (ownerSid == null) return;
+        const om = Nozo.objectManager;
+        if (!om || typeof om.removeByOwner !== "function") {
+            if (Nozo.log) Nozo.log("error:net:_handlerR:noObjectManager", { ownerSid: ownerSid });
+            return;
         }
+        om.removeByOwner(ownerSid);
     }
 
     // G: updateLeaderboard
@@ -364,14 +320,18 @@
     function _handlerO(sid, value) {
         const s = Nozo.state;
         if (!s) return;
+        const pm = Nozo.playerModel || null;
+        if (!pm || typeof pm.applyHealthUpdate !== "function") {
+            if (Nozo.log) Nozo.log("error:net:_handlerO:noPlayerModel", { sid: sid, value: value });
+            return;
+        }
         s.lastHealthUpdateAt = Date.now();
         if (!Array.isArray(s.players) || typeof value !== "number") return;
         for (let i = 0; i < s.players.length; i++) {
             const p = s.players[i];
             if (p && p.sid === sid) {
                 const old = p.health;
-                p.oldHealth = old;
-                p.health = value;
+                pm.applyHealthUpdate(p, value);
                 if (Nozo.healer && typeof Nozo.healer.onHealthUpdate === "function") {
                     if (s.mySid != null && sid === s.mySid) {
                         Nozo.healer.onHealthUpdate(sid, value, old);
@@ -382,26 +342,27 @@
         }
     }
 
-    // E: removePlayer — marks player hidden/inactive.
-    function _handlerE(idOrSid) {
+    // E: removePlayer(id) — id matches moomoo.js removePlayer(id) contract.
+    function _handlerE(id) {
         const s = Nozo.state;
-        if (!s || idOrSid == null) return;
+        if (!s || id == null) return;
         const model = Nozo.playerModel || null;
+        if (!model || typeof model.markDead !== "function") {
+            if (Nozo.log) Nozo.log("error:net:_handlerE:noPlayerModel", { id: id });
+            return;
+        }
         if (!Array.isArray(s.players)) return;
+        let targetSid = null;
         for (let i = 0; i < s.players.length; i++) {
             const p = s.players[i];
             if (!p) continue;
-            if (p.id === idOrSid || p.sid === idOrSid) {
-                if (model && typeof model.markDead === "function") {
-                    model.markDead(s, p.sid);
-                } else {
-                    p.visible = false;
-                    p.active = false;
-                    p.alive = false;
-                }
-                return;
+            if (p.id === id) {
+                targetSid = p.sid;
+                break;
             }
         }
+        if (targetSid == null) return;
+        model.markDead(s, targetSid);
     }
 
     // Build a normalized items list from the raw first arg of the A packet.
@@ -482,9 +443,18 @@
     function _handlerS() {
         const s = Nozo.state;
         if (!s) return;
-        const counts = Array.prototype.slice.call(arguments);
-        s.itemCounts = counts;
-        if (s.player) s.player.itemCounts = counts;
+        const args = Array.prototype.slice.call(arguments);
+        if (args.length === 2 && typeof args[0] === "number" && typeof args[1] === "number") {
+            if (!s.itemCounts || typeof s.itemCounts !== "object") s.itemCounts = {};
+            s.itemCounts[args[0]] = args[1];
+            if (s.player) {
+                if (!s.player.itemCounts || typeof s.player.itemCounts !== "object") s.player.itemCounts = {};
+                s.player.itemCounts[args[0]] = args[1];
+            }
+            return;
+        }
+        s.itemCounts = args;
+        if (s.player) s.player.itemCounts = args;
     }
 
     // T: updateAge — age index and optional XP values forwarded to player.
@@ -509,9 +479,116 @@
     function _handlerV() {
         const s = Nozo.state;
         if (!s) return;
-        const items = Array.prototype.slice.call(arguments);
+        const args = Array.prototype.slice.call(arguments);
+        const items = (args.length === 1 && Array.isArray(args[0])) ? args[0] : args;
         s.heldItems = items;
-        if (s.player) s.player.heldItems = items;
+        if (s.player) {
+            s.player.heldItems = items;
+            s.player.items = items.slice();
+        }
+    }
+
+    // I: loadAI — upsert AI entities from tuples.
+    // Tuple target shape mirrors object-like entities: [sid, x, y, dir, scale, type, ownerSid]
+    function _handlerI(data) {
+        const s = Nozo.state;
+        if (!s) return;
+        if (!Array.isArray(data)) return;
+        if (!Array.isArray(s.ais)) s.ais = [];
+        if (!s.aiBySid || typeof s.aiBySid !== "object") s.aiBySid = {};
+
+        for (let i = 0; i + 7 <= data.length; i += 7) {
+            const sid = data[i];
+            if (sid == null) continue;
+            const ai = s.aiBySid[sid] || { sid: sid };
+            ai.sid = sid;
+            ai.x = typeof data[i + 1] === "number" ? data[i + 1] : (ai.x || 0);
+            ai.y = typeof data[i + 2] === "number" ? data[i + 2] : (ai.y || 0);
+            ai.x2 = ai.x;
+            ai.y2 = ai.y;
+            ai.dir = typeof data[i + 3] === "number" ? data[i + 3] : (ai.dir || 0);
+            ai.scale = typeof data[i + 4] === "number" ? data[i + 4] : (ai.scale || 0);
+            ai.type = data[i + 5] != null ? data[i + 5] : (ai.type || null);
+            ai.ownerSid = data[i + 6] != null ? data[i + 6] : (ai.ownerSid || null);
+            ai.visible = true;
+            ai.active = true;
+            ai.lastSeenAt = Date.now();
+            s.aiBySid[sid] = ai;
+        }
+        s.ais = Object.keys(s.aiBySid).map(function (k) { return s.aiBySid[k]; });
+    }
+
+    // J: animateAI — update direction/position animation state for AI sid.
+    // common shape: (sid, x, y, dir)
+    function _handlerJ(sid, x, y, dir) {
+        const s = Nozo.state;
+        if (!s || sid == null) return;
+        if (!s.aiBySid || typeof s.aiBySid !== "object") s.aiBySid = {};
+        const ai = s.aiBySid[sid] || { sid: sid };
+        if (typeof x === "number") { ai.x = x; ai.x2 = x; }
+        if (typeof y === "number") { ai.y = y; ai.y2 = y; }
+        if (typeof dir === "number") ai.dir = dir;
+        ai.visible = true;
+        ai.active = true;
+        ai.lastAnimAt = Date.now();
+        s.aiBySid[sid] = ai;
+        if (!Array.isArray(s.ais)) s.ais = [];
+        let found = false;
+        for (let i = 0; i < s.ais.length; i++) {
+            if (s.ais[i] && s.ais[i].sid === sid) { s.ais[i] = ai; found = true; break; }
+        }
+        if (!found) s.ais.push(ai);
+    }
+
+    // L: wiggleGameObject — mutate live object orientation/state by sid.
+    // common shape: (sid, dir[, x, y])
+    function _handlerL(sid, dir, x, y) {
+        const s = Nozo.state;
+        if (!s || sid == null) return;
+        const om = Nozo.objectManager;
+        if (!om || typeof om.getBySid !== "function") {
+            if (Nozo.log) Nozo.log("error:net:_handlerL:noObjectManager", { sid: sid });
+            return;
+        }
+        const obj = om.getBySid(sid);
+        if (!obj) return;
+        if (typeof dir === "number") obj.dir = dir;
+        if (typeof x === "number") obj.x = x;
+        if (typeof y === "number") obj.y = y;
+        obj.lastWiggleAt = Date.now();
+    }
+
+    // M: shootTurret — record turret shot event and optionally synth projectile record.
+    // common shape: (sid, x, y, dir[, projId])
+    function _handlerM(sid, x, y, dir, projId) {
+        const s = Nozo.state;
+        if (!s) return;
+        if (!Array.isArray(s.turretShots)) s.turretShots = [];
+        const shot = {
+            sid: sid != null ? sid : null,
+            x: typeof x === "number" ? x : null,
+            y: typeof y === "number" ? y : null,
+            dir: typeof dir === "number" ? dir : null,
+            projId: projId != null ? projId : null,
+            t: Date.now()
+        };
+        s.turretShots.push(shot);
+        if (s.turretShots.length > 120) s.turretShots.shift();
+        s.lastTurretShot = shot;
+
+        // If projectile id supplied, mirror into projectile map so combat/render can consume.
+        if (shot.projId != null) {
+            if (!s.projectiles || typeof s.projectiles !== "object") s.projectiles = {};
+            s.projectiles[shot.projId] = {
+                id: shot.projId,
+                ownerSid: shot.sid,
+                type: "turret",
+                x: typeof shot.x === "number" ? shot.x : 0,
+                y: typeof shot.y === "number" ? shot.y : 0,
+                dir: typeof shot.dir === "number" ? shot.dir : 0,
+                t: shot.t
+            };
+        }
     }
 
     // --- observe stubs for unimplemented high-risk handlers -------------------
@@ -628,11 +705,11 @@
         a: _handlerA,
         G: _handlerG,
         H: _handlerH,
-        I: _makeObserver("I"),
-        J: _makeObserver("J"),
+        I: _handlerI,
+        J: _handlerJ,
         K: _handlerK,
-        L: _makeObserver("L"),
-        M: _makeObserver("M"),
+        L: _handlerL,
+        M: _handlerM,
         N: _handlerN,
         O: _handlerO,
         P: _handlerP,

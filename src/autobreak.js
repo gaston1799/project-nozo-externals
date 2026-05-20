@@ -68,16 +68,18 @@
     }
 
     function _getObjScale(obj) {
+        const om = Nozo.objectModel;
+        if (om) return om.getScale(obj);
         try { if (typeof obj.getScale === "function") return obj.getScale() || obj.scale || 0; } catch (e) {}
         return (obj && obj.scale) || 0;
     }
 
+    // Team-object check via objectModel canonical helper.
     function _isTeamObject(obj, player) {
         if (!obj || !player) return false;
-        try { if (typeof obj.isTeamObject === "function") return !!obj.isTeamObject(player); } catch (e) {}
-        if (obj.owner && player.sid != null && obj.owner.sid === player.sid) return true;
-        if (obj.team != null && player.team != null && obj.team === player.team) return true;
-        return false;
+        const om = Nozo.objectModel;
+        if (!om || typeof om.isTeamObject !== "function") return false;
+        return om.isTeamObject(obj, player);
     }
 
     // Resolve object lists: prefer context fields, fall back to Nozo.state.
@@ -356,8 +358,8 @@
         for (let i = 0; i < checkList.length; i++) {
             const e = checkList[i];
             if (!e || !e.active || _isTeamObject(e, player)) continue;
-            const nm = e.name && typeof e.name === "string" ? e.name.toLowerCase() : "";
-            if (nm === "turret" || nm === "teleporter" || nm === "blocker") {
+            // Use objectModel flags (set by decorateObject) instead of name-string comparisons.
+            if (e.turret || e.teleport || e.blocker) {
                 if (!priority[2].includes(e)) priority[2].push(e);
             }
         }

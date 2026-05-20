@@ -60,17 +60,18 @@
     }
 
     function _getObjScale(obj) {
+        const om = Nozo.objectModel;
+        if (om) return om.getScale(obj);
         try { if (typeof obj.getScale === "function") return obj.getScale() || obj.scale || 0; } catch (e) {}
         return (obj && obj.scale) || 0;
     }
 
-    // Conservative team-object check: try obj.isTeamObject first, then owner/team fallback.
+    // Team-object check via objectModel canonical helper.
     function _isTeamObject(obj, player) {
         if (!obj || !player) return false;
-        try { if (typeof obj.isTeamObject === "function") return !!obj.isTeamObject(player); } catch (e) {}
-        if (obj.owner && player.sid != null && obj.owner.sid === player.sid) return true;
-        if (obj.team != null && player.team != null && obj.team === player.team) return true;
-        return false;
+        const om = Nozo.objectModel;
+        if (!om || typeof om.isTeamObject !== "function") return false;
+        return om.isTeamObject(obj, player);
     }
 
     // Resolve object lists: prefer context fields, fall back to Nozo.state.

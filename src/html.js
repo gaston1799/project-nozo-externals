@@ -13,8 +13,12 @@
         "render.enabled":    true,
         "traps.enabled":     true,
         "autobreak.enabled": true,
+        "autoplace.enabled": true,
+        "replacer.enabled":  true,
+        "preplacer.enabled": true,
         "healer.enabled":    true,
         "movement.enabled":  false,
+        "kbi.render":        true,
         "debug.enabled":     true
     };
 
@@ -95,6 +99,24 @@
 
     function _applyHealer(val) {
         if (Nozo.healer && typeof Nozo.healer.setEnabled === "function") Nozo.healer.setEnabled(val);
+    }
+
+    function _applyAutoPlace(val) {
+        if (Nozo.autoPlace && typeof Nozo.autoPlace.setEnabled === "function") Nozo.autoPlace.setEnabled(val);
+    }
+
+    function _applyReplacer(val) {
+        if (Nozo.replacer && typeof Nozo.replacer.setEnabled === "function") Nozo.replacer.setEnabled(val);
+    }
+
+    function _applyPreplacer(val) {
+        if (Nozo.preplacer && typeof Nozo.preplacer.setEnabled === "function") Nozo.preplacer.setEnabled(val);
+    }
+
+    function _applyKbiRender(val) {
+        if (Nozo.kbSimulator && typeof Nozo.kbSimulator.setRenderEnabled === "function") {
+            Nozo.kbSimulator.setRenderEnabled(val);
+        }
     }
 
     function _applyDebug(val) {
@@ -202,7 +224,11 @@
         body.appendChild(_makeSection(doc, "Combat"));
         body.appendChild(_makeRow(doc, "Trap System", "traps.enabled", _applyTraps));
         body.appendChild(_makeRow(doc, "AutoBreak", "autobreak.enabled", _applyAutoBreak));
+        body.appendChild(_makeRow(doc, "AutoPlace", "autoplace.enabled", _applyAutoPlace));
+        body.appendChild(_makeRow(doc, "Replacer", "replacer.enabled", _applyReplacer));
+        body.appendChild(_makeRow(doc, "Preplacer", "preplacer.enabled", _applyPreplacer));
         body.appendChild(_makeRow(doc, "Healer", "healer.enabled", _applyHealer));
+        body.appendChild(_makeRow(doc, "KBI Render", "kbi.render", _applyKbiRender));
 
         // --- Movement section ---
         body.appendChild(_makeSection(doc, "Movement"));
@@ -229,8 +255,12 @@
         _applyRender(!!state.settings["render.enabled"]);
         _applyTraps(!!state.settings["traps.enabled"]);
         _applyAutoBreak(!!state.settings["autobreak.enabled"]);
+        _applyAutoPlace(!!state.settings["autoplace.enabled"]);
+        _applyReplacer(!!state.settings["replacer.enabled"]);
+        _applyPreplacer(!!state.settings["preplacer.enabled"]);
         _applyHealer(!!state.settings["healer.enabled"]);
         _applyMovement(!!state.settings["movement.enabled"]);
+        _applyKbiRender(!!state.settings["kbi.render"]);
         _applyDebug(!!state.settings["debug.enabled"]);
 
         // Start auto-refresh for debug info display.

@@ -109,13 +109,82 @@
         return player;
     }
 
+    // Single alive+active gate used by all modules that need to skip dead/inactive players.
+    function isAlive(player) {
+        if (!player) return false;
+        return player.alive !== false && player.active !== false;
+    }
+
+    // Player-to-player team check (sid-identity or team-field equality).
+    function isSameTeam(a, b) {
+        if (!a || !b) return false;
+        if (a.sid != null && b.sid != null && a.sid === b.sid) return true;
+        if (a.team != null && b.team != null && a.team === b.team) return true;
+        return false;
+    }
+
+    // Centralized reload-ready check. Mirrors the gate in combat.canSwing:
+    //   reload <= Math.max(pingTime, 0) means weapon is ready.
+    // Returns true when no weapon/reload info is available (safe default).
+    function isReloadReady(player, weaponIndex, pingTime) {
+        if (!player) return false;
+        const wi   = weaponIndex != null ? weaponIndex : player.weaponIndex;
+        if (wi == null) return true;
+        const reload = player.reloads && typeof player.reloads[wi] === "number" ? player.reloads[wi] : 0;
+        const ping   = typeof pingTime === "number" ? pingTime : 0;
+        return reload <= Math.max(ping, 0);
+    }
+
+    // Apply a new health value, preserving the prior value in oldHealth.
+    // Used by the O-handler and healer to track damage deltas without inline patching.
+    function applyHealthUpdate(player, newHealth) {
+        if (!player || typeof newHealth !== "number") return;
+        player.oldHealth = typeof player.health === "number" ? player.health : newHealth;
+        player.health = newHealth;
+    }
+
+    // Team-field-only check: returns true when both players share a non-null team value.
+    // Use isSameTeam when sid-identity (self-check) should also pass; use isTeam when
+    // you want team-grouping only (e.g. "is this a teammate, not self?").
+    function isTeam(a, b) {
+        if (!a || !b) return false;
+        if (a.team == null || b.team == null) return false;
+        return a.team === b.team;
+    }
+
+    // Set the reload counter for one weapon slot. Called when server pushes N-packet
+    // reload state so all reload mutations go through a single path.
+    function setReload(player, weaponIndex, value) {
+        if (!player || weaponIndex == null) return;
+        if (!player.reloads || typeof player.reloads !== "object") player.reloads = {};
+        player.reloads[weaponIndex] = typeof value === "number" ? value : 0;
+    }
+
+    // Stamp the player as "under attack": sets lastDamageThreatAt and increments
+    // damageThreatCount. Used by healer and combat to detect incoming-damage rate
+    // without duplicating the damage-delta calculation at each call site.
+    function addDamageThreat(player, amount) {
+        if (!player) return;
+        player.lastDamageThreatAt = Date.now();
+        player.damageThreatCount = (typeof player.damageThreatCount === "number"
+            ? player.damageThreatCount : 0) + 1;
+        if (typeof amount === "number" && amount > 0) player.lastDamageThreatAmount = amount;
+    }
+
     const playerModel = {
-        createPlayerBase: createPlayerBase,
+        createPlayerBase:  createPlayerBase,
         ensurePlayersState: ensurePlayersState,
-        findPlayerBySid: findPlayerBySid,
-        ensurePlayer: ensurePlayer,
-        markDead: markDead,
-        applyTupleUpdate: applyTupleUpdate
+        findPlayerBySid:   findPlayerBySid,
+        ensurePlayer:      ensurePlayer,
+        markDead:          markDead,
+        applyTupleUpdate:  applyTupleUpdate,
+        isAlive:           isAlive,
+        isTeam:            isTeam,
+        isSameTeam:        isSameTeam,
+        isReloadReady:     isReloadReady,
+        applyHealthUpdate: applyHealthUpdate,
+        setReload:         setReload,
+        addDamageThreat:   addDamageThreat
     };
 
     Nozo.playerModel = playerModel;
