@@ -301,6 +301,86 @@
         ctx.stroke();
     }
 
+    function _renderTail(ctx, scale, style) {
+        const r = Math.max(5, scale * 0.42);
+        const off = Math.max(8, scale * 1.05);
+        ctx.save();
+        ctx.translate(-off, 0);
+        ctx.beginPath();
+        ctx.arc(0, 0, r, 0, Math.PI * 2);
+        ctx.fillStyle = style.enemyFill;
+        ctx.fill();
+        ctx.lineWidth = Math.max(1, scale * 0.05);
+        ctx.strokeStyle = style.enemyStroke;
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    function _renderSkin(ctx, scale) {
+        const r = Math.max(5, scale * 0.35);
+        ctx.save();
+        ctx.rotate(Math.PI / 2);
+        ctx.beginPath();
+        ctx.arc(0, 0, r, 0, Math.PI * 2);
+        ctx.strokeStyle = "rgba(255,255,255,0.55)";
+        ctx.lineWidth = Math.max(1, scale * 0.04);
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    function _renderTool(ctx, weaponIndex, scale, style, isSelf) {
+        const len = Math.max(14, scale * (weaponIndex === 10 ? 1.9 : 1.45));
+        const width = Math.max(2.25, scale * 0.15);
+        _drawWeaponSimple(ctx, len, width, isSelf ? style.selfAim : style.enemyAim);
+        ctx.beginPath();
+        ctx.arc(len, 0, Math.max(2, width * 0.55), 0, Math.PI * 2);
+        ctx.fillStyle = isSelf ? style.selfAim : style.enemyAim;
+        ctx.fill();
+    }
+
+    function _renderProjectile(ctx, scale, style) {
+        const r = Math.max(2.5, scale * 0.25 * state.scale);
+        ctx.beginPath();
+        ctx.arc(0, 0, r, 0, Math.PI * 2);
+        ctx.fillStyle = style.enemyAim;
+        ctx.fill();
+    }
+
+    function _renderAI(ctx, scale) {
+        ctx.beginPath();
+        ctx.arc(0, 0, Math.max(6, scale), 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(180,120,60,0.40)";
+        ctx.fill();
+        ctx.strokeStyle = "rgba(210,160,80,0.80)";
+        ctx.lineWidth = Math.max(1.2, scale * 0.06);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(Math.max(6, scale), 0);
+        ctx.strokeStyle = "rgba(255,180,60,0.85)";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+    }
+
+    function _renderDeadPlayer(ctx, scale) {
+        ctx.beginPath();
+        ctx.arc(0, 0, scale, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(100,100,100,0.40)";
+        ctx.fill();
+        ctx.strokeStyle = "rgba(140,140,140,0.60)";
+        ctx.lineWidth = Math.max(1.2, scale * 0.06);
+        ctx.setLineDash([4, 4]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.font = Math.max(8, Math.round(scale * 0.38)) + "px monospace";
+        ctx.fillStyle = "rgba(180,180,180,0.75)";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("(EZ)", 0, 0);
+        ctx.textAlign = "start";
+        ctx.textBaseline = "alphabetic";
+    }
+
     function _renderOnePlayer(ctx, localPx, localPy, cw, ch, p, layer, style) {
         if (!p || p.visible === false || p.active === false) return;
         const x = _px(p, "x");
@@ -317,20 +397,22 @@
         const oHandAngle = (p.buildIndex < 0) ? wm.hndS : 1;
         const oHandDist = (p.buildIndex < 0) ? wm.hndD : 1;
         const skinFill = _skinColorFor(p, style.hand);
-        const weaponLen = Math.max(16, scale * 1.45);
-        const weaponWidth = Math.max(2.5, scale * 0.16);
 
         // layer 0: legacy order (tail -> weapon below -> hands -> weapon above -> body -> skin hook)
         if (layer === 0) {
-            if (p.tailIndex > 0 && Nozo.compat && typeof Nozo.compat.renderTail === "function") {
-                try { Nozo.compat.renderTail(p, ctx, state.scale); } catch (e) {}
+            if (p.tailIndex > 0) {
+                if (Nozo.compat && typeof Nozo.compat.renderTail === "function") {
+                    try { Nozo.compat.renderTail(p, ctx, state.scale); } catch (e) { _renderTail(ctx, scale, style); }
+                } else {
+                    _renderTail(ctx, scale, style);
+                }
             }
 
             if (p.buildIndex < 0 && !wm.aboveHand && wm.weapon) {
                 ctx.save();
                 ctx.translate(sp.x, sp.y);
                 ctx.rotate(dir);
-                _drawWeaponSimple(ctx, weaponLen, weaponWidth, style.enemyAim);
+                _renderTool(ctx, p.weaponIndex, scale, style, isSelf);
                 ctx.restore();
             }
 
@@ -352,7 +434,7 @@
                 ctx.save();
                 ctx.translate(sp.x, sp.y);
                 ctx.rotate(dir);
-                _drawWeaponSimple(ctx, weaponLen, weaponWidth, isSelf ? style.selfAim : style.enemyAim);
+                _renderTool(ctx, p.weaponIndex, scale, style, isSelf);
                 ctx.restore();
             }
 
@@ -364,14 +446,26 @@
             ctx.strokeStyle = isSelf ? style.selfStroke : style.enemyStroke;
             ctx.stroke();
 
-            if (p.skinIndex > 0 && Nozo.compat && typeof Nozo.compat.renderSkin === "function") {
-                try {
+            if (p.skinIndex > 0) {
+                if (Nozo.compat && typeof Nozo.compat.renderSkin === "function") {
+                    try {
+                        ctx.save();
+                        ctx.translate(sp.x, sp.y);
+                        ctx.rotate(Math.PI / 2);
+                        Nozo.compat.renderSkin(p, ctx, state.scale);
+                        ctx.restore();
+                    } catch (e) {
+                        ctx.save();
+                        ctx.translate(sp.x, sp.y);
+                        _renderSkin(ctx, scale);
+                        ctx.restore();
+                    }
+                } else {
                     ctx.save();
                     ctx.translate(sp.x, sp.y);
-                    ctx.rotate(Math.PI / 2);
-                    Nozo.compat.renderSkin(p, ctx, state.scale);
+                    _renderSkin(ctx, scale);
                     ctx.restore();
-                } catch (e) {}
+                }
             }
 
             // BUILD ITEM: when buildIndex >= 0 the player holds a placed item.
@@ -724,23 +818,8 @@
             const scale = Math.max(12, Number(p.scale || 35) * state.scale);
 
             ctx.save();
-            ctx.beginPath();
-            ctx.arc(sp.x, sp.y, scale, 0, Math.PI * 2);
-            ctx.fillStyle = "rgba(100,100,100,0.40)";
-            ctx.fill();
-            ctx.strokeStyle = "rgba(140,140,140,0.60)";
-            ctx.lineWidth = Math.max(1.2, scale * 0.06);
-            ctx.setLineDash([4, 4]);
-            ctx.stroke();
-            ctx.setLineDash([]);
-
-            ctx.font = Math.max(8, Math.round(scale * 0.38)) + "px monospace";
-            ctx.fillStyle = "rgba(180,180,180,0.75)";
-            ctx.textAlign = "center";
-            ctx.textBaseline = "middle";
-            ctx.fillText("(EZ)", sp.x, sp.y);
-            ctx.textAlign = "start";
-            ctx.textBaseline = "alphabetic";
+            ctx.translate(sp.x, sp.y);
+            _renderDeadPlayer(ctx, scale);
             ctx.restore();
         }
     }
@@ -759,22 +838,9 @@
             const dir = (typeof ai.dir === "number" && isFinite(ai.dir)) ? ai.dir : 0;
 
             ctx.save();
-            ctx.beginPath();
-            ctx.arc(sp.x, sp.y, sc, 0, Math.PI * 2);
-            ctx.fillStyle = "rgba(180,120,60,0.40)";
-            ctx.fill();
-            ctx.strokeStyle = "rgba(210,160,80,0.80)";
-            ctx.lineWidth = Math.max(1.2, sc * 0.06);
-            ctx.stroke();
-
-            const tipX = sp.x + Math.cos(dir) * sc;
-            const tipY = sp.y + Math.sin(dir) * sc;
-            ctx.beginPath();
-            ctx.moveTo(sp.x, sp.y);
-            ctx.lineTo(tipX, tipY);
-            ctx.strokeStyle = "rgba(255,180,60,0.85)";
-            ctx.lineWidth = 1.5;
-            ctx.stroke();
+            ctx.translate(sp.x, sp.y);
+            ctx.rotate(dir);
+            _renderAI(ctx, sc);
             ctx.restore();
         }
     }
@@ -795,22 +861,11 @@
             if (x === null || y === null) continue;
             const sp = _worldToScreen(x, y, px, py, cw, ch);
             const alpha = Math.max(0.2, 1 - age / 3000);
-            const r = Math.max(3, 5 * state.scale);
-
             ctx.save();
-            ctx.beginPath();
-            ctx.arc(sp.x, sp.y, r, 0, Math.PI * 2);
-            ctx.fillStyle = "rgba(255,210,60," + alpha.toFixed(3) + ")";
-            ctx.fill();
-            if (typeof p.dir === "number" && isFinite(p.dir)) {
-                const len = Math.max(8, 12 * state.scale);
-                ctx.beginPath();
-                ctx.moveTo(sp.x, sp.y);
-                ctx.lineTo(sp.x + Math.cos(p.dir) * len, sp.y + Math.sin(p.dir) * len);
-                ctx.strokeStyle = "rgba(255,210,60," + alpha.toFixed(3) + ")";
-                ctx.lineWidth = 1.5;
-                ctx.stroke();
-            }
+            ctx.translate(sp.x, sp.y);
+            if (typeof p.dir === "number" && isFinite(p.dir)) ctx.rotate(p.dir);
+            ctx.globalAlpha = alpha;
+            _renderProjectile(ctx, p.scale || 9, getActiveStyle());
             ctx.restore();
         }
     }
