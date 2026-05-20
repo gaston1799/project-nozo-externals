@@ -255,6 +255,261 @@
         ctx.restore();
     }
 
+    function _readLegacyRenderFlags() {
+        let showAutoPushRender = true;
+        let showTracerGhost = true;
+        let showSpikeCones = false;
+        try {
+            const ls = root.localStorage;
+            if (ls) {
+                showAutoPushRender = (ls.getItem("showAutoPushRender") ?? "1") === "1";
+                showTracerGhost = (ls.getItem("showTracerGhost") ?? "1") === "1";
+                showSpikeCones = (ls.getItem("showSpikeCones") ?? "0") === "1";
+            }
+        } catch (e) {}
+        return {
+            showAutoPushRender: showAutoPushRender,
+            showTracerGhost: showTracerGhost,
+            showSpikeCones: showSpikeCones
+        };
+    }
+
+    function _getThingState() {
+        return Nozo.globals || root._things || {};
+    }
+
+    function _renderPushOverlay(ctx, px, py, cw, ch) {
+        const th = _getThingState();
+        const flags = _readLegacyRenderFlags();
+        if (!flags.showAutoPushRender || th.showAutoPushRender === false) return;
+        const V = th.pushVis_;
+        if (!V || !V.enemy || !V.player || !V.ring) return;
+
+        const enemy = _worldToScreen(V.enemy.x, V.enemy.y, px, py, cw, ch);
+        const player = _worldToScreen(V.player.x, V.player.y, px, py, cw, ch);
+        const spike = _worldToScreen(V.spike.x, V.spike.y, px, py, cw, ch);
+        const target = _worldToScreen(V.target.x, V.target.y, px, py, cw, ch);
+        const ringR = (V.ring.r || 0) * state.scale;
+        if (!isFinite(ringR) || ringR <= 0) return;
+
+        ctx.beginPath();
+        ctx.arc(enemy.x, enemy.y, ringR, 0, Math.PI * 2);
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = "rgba(255,80,80,0.6)";
+        ctx.stroke();
+
+        const chain = th.autoPushChain || null;
+        const liveAngBehind = (chain && typeof chain.angBehind === "number") ? chain.angBehind : V.angBehind;
+        if (typeof liveAngBehind === "number" && isFinite(liveAngBehind)) {
+            const half = 80 * Math.PI / 180;
+            const arcR = ringR;
+            const steps = 7;
+            const raycast = Nozo.Utils && typeof Nozo.Utils.raycast === "function" ? Nozo.Utils.raycast : null;
+
+            ctx.beginPath();
+            ctx.arc(enemy.x, enemy.y, arcR, liveAngBehind - half, liveAngBehind + half);
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = "rgba(0,255,80,0.5)";
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.moveTo(enemy.x + Math.cos(liveAngBehind) * (arcR - 6), enemy.y + Math.sin(liveAngBehind) * (arcR - 6));
+            ctx.lineTo(enemy.x + Math.cos(liveAngBehind) * (arcR + 6), enemy.y + Math.sin(liveAngBehind) * (arcR + 6));
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = "rgba(0,255,80,1)";
+            ctx.stroke();
+
+            for (let i = 0; i <= steps; i++) {
+                const a = liveAngBehind - half + (i / steps) * (half * 2);
+                const ptx = V.enemy.x + Math.cos(a) * V.ring.r;
+                const pty = V.enemy.y + Math.sin(a) * V.ring.r;
+                const hit = raycast ? raycast({ x: V.player.x, y: V.player.y }, { x: ptx, y: pty }, { includeTraps: false }) : false;
+                const sp = _worldToScreen(ptx, pty, px, py, cw, ch);
+                ctx.beginPath();
+                ctx.arc(sp.x, sp.y, 4, 0, Math.PI * 2);
+                ctx.fillStyle = hit ? "rgba(255,60,60,0.9)" : "rgba(0,255,80,0.9)";
+                ctx.fill();
+            }
+        }
+
+        ctx.fillStyle = "rgba(255,80,80,0.9)";
+        ctx.beginPath(); ctx.arc(enemy.x, enemy.y, 3.5, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "rgba(0,200,255,0.9)";
+        ctx.beginPath(); ctx.arc(player.x, player.y, 3.5, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "rgba(255,170,0,0.9)";
+        ctx.beginPath(); ctx.arc(spike.x, spike.y, 3.5, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "rgba(0,255,140,0.9)";
+        ctx.beginPath(); ctx.arc(target.x, target.y, 3.5, 0, Math.PI * 2); ctx.fill();
+
+        const pRad = (V.player.r || 35) * state.scale;
+        const L = 90;
+        const mx = player.x + L * Math.cos(V.moveAngle || 0);
+        const my = player.y + L * Math.sin(V.moveAngle || 0);
+        ctx.beginPath();
+        ctx.arc(player.x, player.y, pRad, 0, Math.PI * 2);
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = "rgba(0,200,255,0.5)";
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(player.x, player.y);
+        ctx.lineTo(mx, my);
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = "rgba(0,255,120,1)";
+        ctx.stroke();
+
+        const ang = V.moveAngle || 0;
+        const A = 10;
+        ctx.beginPath();
+        ctx.moveTo(mx, my);
+        ctx.lineTo(mx - A * Math.cos(ang + 0.45), my - A * Math.sin(ang + 0.45));
+        ctx.moveTo(mx, my);
+        ctx.lineTo(mx - A * Math.cos(ang - 0.45), my - A * Math.sin(ang - 0.45));
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = "rgba(0,255,120,1)";
+        ctx.stroke();
+
+        ctx.font = "bold 12px monospace";
+        ctx.fillStyle = "rgba(0,255,120,1)";
+        const angleDeg = ((((V.moveAngle || 0) * 180 / Math.PI) % 360) + 360).toFixed(1);
+        ctx.fillText("dir=" + angleDeg + "°", player.x + 10, player.y - 22);
+        ctx.fillStyle = "rgba(255,255,255,0.9)";
+        ctx.fillText("bucket=" + (V.bucket == null ? "-" : V.bucket), player.x + 10, player.y - 10);
+        ctx.fillStyle = "rgba(255,200,0,0.9)";
+        ctx.fillText("orbitR=" + Number(V.ring.r || 0).toFixed(1), player.x + 10, player.y + 2);
+    }
+
+    function _renderSpikeCones(ctx, px, py, cw, ch) {
+        const th = _getThingState();
+        const flags = _readLegacyRenderFlags();
+        if (!flags.showSpikeCones && !th.showSpikeCones) return;
+        const data = th.spikeCones;
+        if (!data || !Array.isArray(data.spikes)) return;
+
+        const c = _worldToScreen(data.cx, data.cy, px, py, cw, ch);
+        const enemyRange = Math.max(0, (data.enemyRange || 0) * state.scale);
+        const outerRadius = Math.max(0, (data.outerRadius || 0) * state.scale);
+        if (enemyRange <= 0 || outerRadius <= 0) return;
+
+        ctx.beginPath();
+        ctx.arc(c.x, c.y, enemyRange, 0, Math.PI * 2);
+        ctx.strokeStyle = "rgba(255,255,255,0.5)";
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 3]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        ctx.beginPath();
+        ctx.arc(c.x, c.y, outerRadius, 0, Math.PI * 2);
+        ctx.strokeStyle = "rgba(255,0,76,0.35)";
+        ctx.lineWidth = 1;
+        ctx.setLineDash([6, 4]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        for (let i = 0; i < data.spikes.length; i++) {
+            const s = data.spikes[i];
+            if (!s) continue;
+            const startAngle = s.angle - s.halfAngle;
+            const endAngle = s.angle + s.halfAngle;
+            const rEnd = Math.min((s.radialEnd || data.outerRadius) * state.scale, outerRadius);
+
+            ctx.beginPath();
+            ctx.moveTo(c.x, c.y);
+            ctx.arc(c.x, c.y, rEnd, startAngle, endAngle);
+            ctx.closePath();
+            ctx.fillStyle = s.threat ? "rgba(255,0,76,0.18)" : (!s.baseThreat ? "rgba(255,165,0,0.08)" : "rgba(128,128,128,0.12)");
+            ctx.fill();
+
+            ctx.beginPath();
+            ctx.arc(c.x, c.y, rEnd, startAngle, endAngle);
+            ctx.strokeStyle = s.threat ? "rgba(255,0,76,0.7)" : (!s.baseThreat ? "rgba(255,165,0,0.6)" : "rgba(120,120,120,0.6)");
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.moveTo(c.x, c.y);
+            ctx.lineTo(c.x + Math.cos(s.angle) * rEnd, c.y + Math.sin(s.angle) * rEnd);
+            ctx.strokeStyle = s.threat ? "rgba(255,0,76,0.9)" : (!s.baseThreat ? "rgba(255,165,0,0.75)" : "rgba(120,120,120,0.9)");
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash(s.threat || !s.baseThreat ? [] : [4, 3]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }
+    }
+
+    function _renderNextTickGhost(ctx, px, py, cw, ch) {
+        const th = _getThingState();
+        const flags = _readLegacyRenderFlags();
+        if (!flags.showTracerGhost && !th.showTracerGhost) return;
+        const player = (Nozo.state && Nozo.state.player) || null;
+        if (!player) return;
+
+        const x = _px(player, "x");
+        const y = _px(player, "y");
+        if (x === null || y === null) return;
+
+        const tickMs = (root.config && root.config.serverUpdateRate && 1000 / root.config.serverUpdateRate) || 111.111;
+        const maxSpeed = (typeof player.maxSpeed === "number" && player.maxSpeed > 0) ? player.maxSpeed : 8;
+        const cap = maxSpeed / 1000;
+        const vxRaw = typeof player._vx === "number" ? player._vx : 0;
+        const vyRaw = typeof player._vy === "number" ? player._vy : 0;
+        const vx = Math.abs(vxRaw) > cap ? Math.sign(vxRaw) * cap : vxRaw;
+        const vy = Math.abs(vyRaw) > cap ? Math.sign(vyRaw) * cap : vyRaw;
+        const nx = x + vx * tickMs;
+        const ny = y + vy * tickMs;
+        const nsp = _worldToScreen(nx, ny, px, py, cw, ch);
+
+        let dangerObj = null;
+        const objs = (Nozo.state && (Nozo.state.liztobj || Nozo.state.gameObjects)) || [];
+        if (Array.isArray(objs) && objs.length) {
+            const pr = player.scale || 35;
+            for (let i = 0; i < objs.length; i++) {
+                const o = objs[i];
+                if (!o || !o.active || !o.dmg) continue;
+                const ox = _px(o, "x");
+                const oy = _px(o, "y");
+                if (ox === null || oy === null) continue;
+                const d = Math.hypot(nx - ox, ny - oy);
+                if (d <= (pr + (o.scale || 18))) {
+                    dangerObj = o;
+                    break;
+                }
+            }
+        }
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(nsp.x, nsp.y, Math.max(6, (player.scale || 35) * 0.35 * state.scale), 0, Math.PI * 2);
+        ctx.fillStyle = dangerObj ? "rgba(255,0,76,0.75)" : "rgba(0,200,255,0.6)";
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = dangerObj ? "rgba(255,0,76,1)" : "rgba(0,0,0,0.35)";
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(nsp.x, nsp.y);
+        ctx.lineTo(nsp.x + vx * 18 * state.scale, nsp.y + vy * 18 * state.scale);
+        ctx.strokeStyle = dangerObj ? "rgba(255,0,76,1)" : "rgba(0,200,255,0.9)";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        if (dangerObj) {
+            const dx = _px(dangerObj, "x");
+            const dy = _px(dangerObj, "y");
+            if (dx !== null && dy !== null) {
+                const dsp = _worldToScreen(dx, dy, px, py, cw, ch);
+                ctx.setLineDash([6, 4]);
+                ctx.beginPath();
+                ctx.arc(dsp.x, dsp.y, (dangerObj.scale || 18) * state.scale, 0, Math.PI * 2);
+                ctx.strokeStyle = "#ff0000";
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
+        }
+        ctx.restore();
+    }
+
     function draw(gameCtx) {
         if (!state.enabled) return;
         if (!state.attached || !state.context || !state.canvas) return;
@@ -325,6 +580,9 @@
             }
 
             _drawKbiAnimations(ctx, px, py, cw, ch);
+            _renderPushOverlay(ctx, px, py, cw, ch);
+            _renderSpikeCones(ctx, px, py, cw, ch);
+            _renderNextTickGhost(ctx, px, py, cw, ch);
 
             // HUD debug text (bottom-left)
             const hudLines = [];

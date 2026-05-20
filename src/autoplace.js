@@ -168,6 +168,7 @@
         const player = _resolvePlayer(ctx);
         const enemy = _resolveEnemy(ctx);
         if (!player || !enemy) {
+            if (Nozo.instaKill && typeof Nozo.instaKill.setCan === "function") Nozo.instaKill.setCan(false);
             state.active = false;
             state.lastReason = "noPlayerEnemy";
             return { ok: false, reason: "noPlayerEnemy" };
@@ -175,6 +176,7 @@
 
         const gate = _canPlace(ctx);
         if (!gate.ok) {
+            if (Nozo.instaKill && typeof Nozo.instaKill.setCan === "function") Nozo.instaKill.setCan(false);
             state.active = false;
             state.lastReason = gate.reason;
             return { ok: false, reason: gate.reason };
@@ -185,6 +187,7 @@
         const inTrap = !!(trapsState && trapsState.inTrap);
         const d = _dist(player, enemy);
         if (!isFinite(d) || d > 500) {
+            if (Nozo.instaKill && typeof Nozo.instaKill.setCan === "function") Nozo.instaKill.setCan(false);
             state.active = false;
             state.lastReason = "enemyFar";
             return { ok: false, reason: "enemyFar" };
@@ -193,6 +196,7 @@
         const baseAim = (Nozo.combat && Nozo.combat.calculateAim) ? Nozo.combat.calculateAim(ctx) : null;
         const base = (baseAim && baseAim.ok && isFinite(baseAim.angle)) ? baseAim.angle : _dir(player, enemy);
         if (base == null) {
+            if (Nozo.instaKill && typeof Nozo.instaKill.setCan === "function") Nozo.instaKill.setCan(false);
             state.active = false;
             state.lastReason = "noAim";
             return { ok: false, reason: "noAim" };
@@ -205,9 +209,20 @@
         const step = inTrap ? (Math.PI / 32) : (Math.PI / 24);
         const best = _pickBest(player, enemy, objects, base, range, step);
         if (!best || !isFinite(best.angle)) {
+            if (Nozo.instaKill && typeof Nozo.instaKill.setCan === "function") Nozo.instaKill.setCan(false);
             state.active = false;
             state.lastReason = "noCandidate";
             return { ok: false, reason: "noCandidate" };
+        }
+
+        // Wiring-only parity: mirror legacy instaC readiness flips from KBI/place context.
+        if (Nozo.instaKill) {
+            const canSpikeTick = !!(best.data && best.data.trap > 0);
+            if (typeof Nozo.instaKill.setCan === "function") Nozo.instaKill.setCan(canSpikeTick);
+            if (typeof Nozo.instaKill.setPending === "function") {
+                Nozo.instaKill.setPending(canSpikeTick, "kbi.instaThem", enemy && enemy.sid != null ? enemy.sid : null);
+            }
+            if (Nozo.instaKill.state) Nozo.instaKill.state.canSpikeTick = canSpikeTick;
         }
 
         const mode = (best.data && best.data.trap > 0) ? "trap" : "spike";

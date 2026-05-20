@@ -171,6 +171,7 @@
         const tick = _currentTick();
 
         if (!state.enabled) {
+            if (Nozo.instaKill && typeof Nozo.instaKill.setCan === "function") Nozo.instaKill.setCan(false);
             _record("traps:scan:skip", { reason: "disabled" });
             return { ok: false, aim: null, target: null, reason: "disabled", debug: { tick: tick } };
         }
@@ -179,6 +180,7 @@
         const dbg = { tick: tick, sources: [], objectsChecked: 0, inTrap: false };
 
         if (!player) {
+            if (Nozo.instaKill && typeof Nozo.instaKill.setCan === "function") Nozo.instaKill.setCan(false);
             state.inTrap = false;
             state.lastScan = tick;
             state.lastReason = "noPlayer";
@@ -224,6 +226,9 @@
         let aimReason = null;
 
         if (inTrap) {
+            if (Nozo.instaKill && typeof Nozo.instaKill.setPending === "function") {
+                Nozo.instaKill.setPending(true, "traps.inTrap", null);
+            }
             const enemy = _resolveEnemy(ctx);
             const preferredTargets = [];
             if (enemy) preferredTargets.push(enemy);
@@ -290,6 +295,9 @@
                 trap: !!aimTarget.trap
             } : null;
         } else {
+            if (Nozo.instaKill && typeof Nozo.instaKill.setPending === "function") {
+                Nozo.instaKill.setPending(false, "traps.clear", null);
+            }
             if (_aimEntry) clearAim("noTrapTarget");
             state.aim = null;
             state.target = null;
@@ -308,6 +316,10 @@
             reason: aimReason || "noTrapDetected",
             debug: dbg
         };
+
+        if (Nozo.instaKill && typeof Nozo.instaKill.setCan === "function") {
+            Nozo.instaKill.setCan(!!(result.ok && result.inTrap));
+        }
 
         _record("traps:scan", { ok: result.ok, inTrap: inTrap, reason: result.reason });
         if (Nozo.log) Nozo.log("traps:scan", result);

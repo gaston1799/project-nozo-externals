@@ -16,9 +16,16 @@
         "autoplace.enabled": true,
         "replacer.enabled":  true,
         "preplacer.enabled": true,
+        "autobuy.enabled":   false,
+        "instakill.enabled": false,
+        "instakill.istrue":  false,
+        "instakill.wait":    false,
         "healer.enabled":    true,
         "movement.enabled":  false,
         "kbi.render":        true,
+        "render.autoPush":   true,
+        "render.spikeCones": false,
+        "render.tracerGhost": true,
         "debug.enabled":     true
     };
 
@@ -27,9 +34,13 @@
         mounted:       false,
         visible:       true,
         panel:         null,
+        weaponHud:     null,
         settings:      Object.assign({}, _DEFAULTS),
         _debugInterval: null,
-        _debugInfoEl:  null
+        _debugInfoEl:  null,
+        _weaponHudInterval: null,
+        _lastReloadByWeapon: {},
+        _lastWeaponKey: null
     };
 
     // --- Storage helpers -------------------------------------------------
@@ -101,6 +112,22 @@
         if (Nozo.healer && typeof Nozo.healer.setEnabled === "function") Nozo.healer.setEnabled(val);
     }
 
+    function _applyAutoBuy(val) {
+        if (Nozo.autoBuy && typeof Nozo.autoBuy.setEnabled === "function") Nozo.autoBuy.setEnabled(val);
+    }
+
+    function _applyInstaKillEnabled(val) {
+        if (Nozo.instaKill && typeof Nozo.instaKill.setEnabled === "function") Nozo.instaKill.setEnabled(val);
+    }
+
+    function _applyInstaKillIsTrue(val) {
+        if (Nozo.instaKill && typeof Nozo.instaKill.setIsTrue === "function") Nozo.instaKill.setIsTrue(val);
+    }
+
+    function _applyInstaKillWait(val) {
+        if (Nozo.instaKill && typeof Nozo.instaKill.setWait === "function") Nozo.instaKill.setWait(val);
+    }
+
     function _applyAutoPlace(val) {
         if (Nozo.autoPlace && typeof Nozo.autoPlace.setEnabled === "function") Nozo.autoPlace.setEnabled(val);
     }
@@ -121,6 +148,24 @@
 
     function _applyDebug(val) {
         if (Nozo.debug) Nozo.debug.enabled = !!val;
+    }
+
+    function _applyLegacyRenderFlag(storageKey, val) {
+        try {
+            if (root.localStorage) root.localStorage.setItem(storageKey, val ? "1" : "0");
+        } catch (e) {}
+    }
+
+    function _applyRenderAutoPush(val) {
+        _applyLegacyRenderFlag("showAutoPushRender", !!val);
+    }
+
+    function _applyRenderSpikeCones(val) {
+        _applyLegacyRenderFlag("showSpikeCones", !!val);
+    }
+
+    function _applyRenderTracerGhost(val) {
+        _applyLegacyRenderFlag("showTracerGhost", !!val);
     }
 
     // --- DOM helpers -----------------------------------------------------
@@ -154,6 +199,124 @@
         row.appendChild(cb);
         row.appendChild(span);
         return row;
+    }
+
+    function _injectWeaponHudStyles(doc) {
+        if (!doc) return;
+        if (doc.getElementById("nozoWeaponHudStyle")) return;
+        const style = doc.createElement("style");
+        style.id = "nozoWeaponHudStyle";
+        style.textContent = ""
+            + "@keyframes nozoWiggle{0%{transform:translateX(0)}15%{transform:translateX(-2px)}30%{transform:translateX(2px)}45%{transform:translateX(-1px)}60%{transform:translateX(1px)}100%{transform:translateX(0)}}\n"
+            + "#nozoWeaponHud{position:fixed;left:20px;top:214px;z-index:9999;background:rgba(0,0,0,.72);color:#fff;font-family:monospace;font-size:12px;padding:8px 10px;border-radius:6px;min-width:200px;pointer-events:none;user-select:none;box-shadow:0 2px 12px rgba(0,0,0,.6)}\n"
+            + "#nozoWeaponHud.nozo-wiggle{animation:nozoWiggle 220ms ease-out}\n"
+            + "#nozoWeaponHud .nozo-weapon-row{display:flex;align-items:center;gap:8px}\n"
+            + "#nozoWeaponHud .nozo-weapon-icon{width:34px;height:34px;image-rendering:auto;object-fit:contain;filter:drop-shadow(0 1px 1px rgba(0,0,0,.5))}\n"
+            + "#nozoWeaponHud .nozo-weapon-main{display:flex;flex-direction:column;gap:4px;min-width:0;flex:1}\n"
+            + "#nozoWeaponHud .nozo-weapon-label{font-size:11px;line-height:1;opacity:.95;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:140px}\n"
+            + "#nozoWeaponHud .nozo-reload-wrap{height:8px;background:rgba(255,255,255,.16);border-radius:999px;overflow:hidden}\n"
+            + "#nozoWeaponHud .nozo-reload-bar{height:100%;width:100%;background:linear-gradient(90deg,#7fd14d,#c5ee6e);transform-origin:left center;transform:scaleX(1);transition:transform 80ms linear,background 120ms linear}\n"
+            + "#nozoWeaponHud .nozo-reload-meta{font-size:10px;line-height:1;opacity:.85}";
+        doc.head ? doc.head.appendChild(style) : doc.body && doc.body.appendChild(style);
+    }
+
+    function _createWeaponHud(doc) {
+        if (!doc || !doc.body) return null;
+        const stale = doc.getElementById("nozoWeaponHud");
+        if (stale && stale.parentNode) stale.parentNode.removeChild(stale);
+
+        const hud = doc.createElement("div");
+        hud.id = "nozoWeaponHud";
+        hud.innerHTML = ""
+            + "<div class=\"nozo-weapon-row\">"
+            + "  <img class=\"nozo-weapon-icon\" alt=\"weapon\" />"
+            + "  <div class=\"nozo-weapon-main\">"
+            + "    <div class=\"nozo-weapon-label\">Weapon</div>"
+            + "    <div class=\"nozo-reload-wrap\"><div class=\"nozo-reload-bar\"></div></div>"
+            + "    <div class=\"nozo-reload-meta\">ready</div>"
+            + "  </div>"
+            + "</div>";
+        doc.body.appendChild(hud);
+        return hud;
+    }
+
+    function _syncWeaponHudPosition() {
+        if (!state.weaponHud) return;
+        state.weaponHud.style.top = state.visible ? "214px" : "20px";
+    }
+
+    function _resolveWeaponMeta(weaponIndex) {
+        if (weaponIndex == null) return null;
+        let w = null;
+        if (root.items && Array.isArray(root.items.weapons)) {
+            w = root.items.weapons[weaponIndex] || null;
+        }
+        const nozoList = Nozo.state && Nozo.state.itemsData && Array.isArray(Nozo.state.itemsData.list)
+            ? Nozo.state.itemsData.list : null;
+        const fromNozo = nozoList && nozoList[weaponIndex] ? nozoList[weaponIndex] : null;
+        return {
+            name: (w && w.name) || (fromNozo && fromNozo.name) || ("weapon " + weaponIndex),
+            src: (w && w.src) || null,
+            reload: (w && typeof w.speed === "number" ? w.speed : null) || (fromNozo && typeof fromNozo.reload === "number" ? fromNozo.reload : null)
+        };
+    }
+
+    function _resolveWeaponSpriteUrl(meta) {
+        if (!meta || !meta.src) return null;
+        const src = meta.src;
+        const origin = (root.location && root.location.origin) ? root.location.origin : "https://moomoo.io";
+        return origin.replace(/\/$/, "") + "/img/weapons/" + src + ".png";
+    }
+
+    function _setWiggle() {
+        if (!state.weaponHud) return;
+        state.weaponHud.classList.remove("nozo-wiggle");
+        void state.weaponHud.offsetWidth;
+        state.weaponHud.classList.add("nozo-wiggle");
+    }
+
+    function _updateWeaponHud() {
+        const hud = state.weaponHud;
+        if (!hud) return;
+        const player = Nozo.state && Nozo.state.player ? Nozo.state.player : null;
+        if (!player) {
+            hud.style.display = "none";
+            return;
+        }
+        hud.style.display = "";
+
+        const wi = player.weaponIndex;
+        const meta = _resolveWeaponMeta(wi);
+        const reload = (player.reloads && typeof player.reloads[wi] === "number") ? player.reloads[wi] : 0;
+        const maxReload = Math.max(
+            1,
+            meta && typeof meta.reload === "number" ? meta.reload : 0,
+            Nozo.constants && typeof Nozo.constants.RELOAD_TICK === "number" ? Nozo.constants.RELOAD_TICK : 0,
+            state._lastReloadByWeapon[wi] || 0
+        );
+        if (reload > (state._lastReloadByWeapon[wi] || 0)) state._lastReloadByWeapon[wi] = reload;
+
+        const icon = hud.querySelector(".nozo-weapon-icon");
+        const label = hud.querySelector(".nozo-weapon-label");
+        const bar = hud.querySelector(".nozo-reload-bar");
+        const text = hud.querySelector(".nozo-reload-meta");
+        if (!icon || !label || !bar || !text) return;
+
+        const spriteUrl = _resolveWeaponSpriteUrl(meta);
+        if (spriteUrl && icon.getAttribute("src") !== spriteUrl) icon.setAttribute("src", spriteUrl);
+        label.textContent = (meta && meta.name) ? meta.name : ("weapon " + wi);
+
+        const progress = 1 - Math.max(0, Math.min(1, reload / maxReload));
+        bar.style.transform = "scaleX(" + progress.toFixed(4) + ")";
+        bar.style.background = reload > 0
+            ? "linear-gradient(90deg,#f0a03b,#e15c4c)"
+            : "linear-gradient(90deg,#7fd14d,#c5ee6e)";
+        text.textContent = reload > 0 ? ("reloading " + Math.ceil(reload) + "ms") : "ready";
+
+        const key = wi + ":" + (reload > 0 ? 1 : 0);
+        const prevKey = state._lastWeaponKey;
+        if (prevKey && prevKey !== key && reload > 0) _setWiggle();
+        state._lastWeaponKey = key;
     }
 
     // --- Mount/unmount ---------------------------------------------------
@@ -219,6 +382,9 @@
         // --- Render section ---
         body.appendChild(_makeSection(doc, "Render"));
         body.appendChild(_makeRow(doc, "Render Overlay", "render.enabled", _applyRender));
+        body.appendChild(_makeRow(doc, "AutoPush Render", "render.autoPush", _applyRenderAutoPush));
+        body.appendChild(_makeRow(doc, "Spike Cones", "render.spikeCones", _applyRenderSpikeCones));
+        body.appendChild(_makeRow(doc, "Tracer Ghost", "render.tracerGhost", _applyRenderTracerGhost));
 
         // --- Combat section ---
         body.appendChild(_makeSection(doc, "Combat"));
@@ -227,6 +393,10 @@
         body.appendChild(_makeRow(doc, "AutoPlace", "autoplace.enabled", _applyAutoPlace));
         body.appendChild(_makeRow(doc, "Replacer", "replacer.enabled", _applyReplacer));
         body.appendChild(_makeRow(doc, "Preplacer", "preplacer.enabled", _applyPreplacer));
+        body.appendChild(_makeRow(doc, "AutoBuy", "autobuy.enabled", _applyAutoBuy));
+        body.appendChild(_makeRow(doc, "InstaKill", "instakill.enabled", _applyInstaKillEnabled));
+        body.appendChild(_makeRow(doc, "InstaC isTrue", "instakill.istrue", _applyInstaKillIsTrue));
+        body.appendChild(_makeRow(doc, "InstaC Wait", "instakill.wait", _applyInstaKillWait));
         body.appendChild(_makeRow(doc, "Healer", "healer.enabled", _applyHealer));
         body.appendChild(_makeRow(doc, "KBI Render", "kbi.render", _applyKbiRender));
 
@@ -251,6 +421,12 @@
         state.panel = panel;
         state.mounted = true;
 
+        _injectWeaponHudStyles(doc);
+        state.weaponHud = _createWeaponHud(doc);
+        _syncWeaponHudPosition();
+        _updateWeaponHud();
+        state._weaponHudInterval = root.setInterval(_updateWeaponHud, 80);
+
         // Apply persisted state to live modules immediately on mount.
         _applyRender(!!state.settings["render.enabled"]);
         _applyTraps(!!state.settings["traps.enabled"]);
@@ -258,9 +434,16 @@
         _applyAutoPlace(!!state.settings["autoplace.enabled"]);
         _applyReplacer(!!state.settings["replacer.enabled"]);
         _applyPreplacer(!!state.settings["preplacer.enabled"]);
+        _applyAutoBuy(!!state.settings["autobuy.enabled"]);
+        _applyInstaKillEnabled(!!state.settings["instakill.enabled"]);
+        _applyInstaKillIsTrue(!!state.settings["instakill.istrue"]);
+        _applyInstaKillWait(!!state.settings["instakill.wait"]);
         _applyHealer(!!state.settings["healer.enabled"]);
         _applyMovement(!!state.settings["movement.enabled"]);
         _applyKbiRender(!!state.settings["kbi.render"]);
+        _applyRenderAutoPush(!!state.settings["render.autoPush"]);
+        _applyRenderSpikeCones(!!state.settings["render.spikeCones"]);
+        _applyRenderTracerGhost(!!state.settings["render.tracerGhost"]);
         _applyDebug(!!state.settings["debug.enabled"]);
 
         // Start auto-refresh for debug info display.
@@ -295,9 +478,16 @@
             root.clearInterval(state._debugInterval);
             state._debugInterval = null;
         }
+        if (state._weaponHudInterval) {
+            root.clearInterval(state._weaponHudInterval);
+            state._weaponHudInterval = null;
+        }
         state._debugInfoEl = null;
         const el = state.panel;
         if (el && el.parentNode) el.parentNode.removeChild(el);
+        const wh = state.weaponHud;
+        if (wh && wh.parentNode) wh.parentNode.removeChild(wh);
+        state.weaponHud = null;
         state.panel = null;
         state.mounted = false;
         if (Nozo.log) Nozo.log("html:unmount", {});
@@ -310,6 +500,7 @@
         if (body) body.style.display = state.visible ? "" : "none";
         const btn = state.panel.querySelector("button");
         if (btn) btn.textContent = state.visible ? "-" : "+";
+        _syncWeaponHudPosition();
         if (Nozo.log) Nozo.log("html:toggle", { visible: state.visible });
     }
 

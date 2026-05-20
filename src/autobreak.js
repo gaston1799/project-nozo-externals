@@ -294,6 +294,7 @@
         const tick = _currentTick();
 
         if (!state.enabled) {
+            if (Nozo.instaKill && typeof Nozo.instaKill.setCan === "function") Nozo.instaKill.setCan(false);
             _record("autoBreak:scan:skip", { reason: "disabled" });
             return { ok: false, aim: null, target: null, reason: "disabled", debug: { tick: tick } };
         }
@@ -302,6 +303,7 @@
         const dbg = { tick: tick, sources: [], level: -1, candidates: 0 };
 
         if (!player) {
+            if (Nozo.instaKill && typeof Nozo.instaKill.setCan === "function") Nozo.instaKill.setCan(false);
             clearAim("noPlayer");
             state.lastScan = tick;
             state.lastReason = "noPlayer";
@@ -410,12 +412,22 @@
                 reason: "level:" + level,
                 debug:  dbg
             };
+            if (Nozo.instaKill) {
+                if (typeof Nozo.instaKill.setCan === "function") Nozo.instaKill.setCan(level <= 1);
+                if (typeof Nozo.instaKill.setPending === "function") {
+                    Nozo.instaKill.setPending(level <= 1, "autoBreak:L" + level, state.target && state.target.sid != null ? state.target.sid : null);
+                }
+            }
             _record("autoBreak:scan", { ok: true, level: level, aim: result.aim });
             if (Nozo.log) Nozo.log("autoBreak:scan", out);
             return out;
         }
 
         clearAim("noTargets");
+        if (Nozo.instaKill) {
+            if (typeof Nozo.instaKill.setCan === "function") Nozo.instaKill.setCan(false);
+            if (typeof Nozo.instaKill.setPending === "function") Nozo.instaKill.setPending(false, "autoBreak.clear", null);
+        }
         state.lastScan = tick;
         state.lastReason = "noTargets";
         state.debug = dbg;
