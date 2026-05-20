@@ -13,7 +13,9 @@
         scale: 1,
         debugPath: null,
         attached: false,
-        lastDrawTick: null
+        lastDrawTick: null,
+        _flagCache: null,
+        _flagCacheAt: 0
     };
 
     let _resizeListener = null;
@@ -81,12 +83,9 @@
 
     function attach(canvas) {
         if (state.attached) detach();
-
-        if (canvas && typeof canvas.getContext === "function") {
-            state.canvas = canvas;
-        } else {
-            state.canvas = _createOverlay();
-        }
+        // Always draw on a dedicated overlay canvas.
+        // Never bind directly to gameCanvas (clearing would wipe native world render).
+        state.canvas = _createOverlay();
 
         if (!state.canvas) {
             if (Nozo.log) Nozo.log("render:attach:failed", { reason: "no-canvas" });
@@ -239,6 +238,172 @@
         }
     }
 
+    function _getVisualType() {
+        const cfg = Nozo.state && Nozo.state.renderConfig ? Nozo.state.renderConfig : null;
+        return String((cfg && cfg.visualType) || "default");
+    }
+
+    function _getRenderConfig() {
+        return (Nozo.state && Nozo.state.renderConfig) ? Nozo.state.renderConfig : { resetRender: true };
+    }
+
+    function getActiveStyle() {
+        const vt = _getVisualType();
+        const styles = {
+            "default": { selfFill: "rgba(90,180,255,0.70)", selfStroke: "rgba(90,180,255,0.95)", enemyFill: "rgba(210,210,210,0.65)", enemyStroke: "rgba(255,255,255,0.60)", hand: "rgba(224,194,160,0.95)", selfAim: "rgba(0,255,170,0.95)", enemyAim: "rgba(255,220,120,0.85)" },
+            "classic": { selfFill: "rgba(145,178,219,0.75)", selfStroke: "rgba(40,40,40,0.85)", enemyFill: "rgba(145,178,219,0.75)", enemyStroke: "rgba(40,40,40,0.85)", hand: "rgba(197,136,99,0.95)", selfAim: "rgba(255,255,255,0.95)", enemyAim: "rgba(255,255,255,0.9)" },
+            "neo": { selfFill: "rgba(20,210,255,0.65)", selfStroke: "rgba(0,255,255,0.95)", enemyFill: "rgba(170,200,220,0.55)", enemyStroke: "rgba(180,240,255,0.85)", hand: "rgba(225,200,160,0.95)", selfAim: "rgba(0,255,170,0.95)", enemyAim: "rgba(160,230,255,0.85)" },
+            "neon": { selfFill: "rgba(0,255,160,0.55)", selfStroke: "rgba(0,255,200,0.95)", enemyFill: "rgba(120,160,210,0.50)", enemyStroke: "rgba(130,190,255,0.85)", hand: "rgba(240,220,180,0.95)", selfAim: "rgba(0,255,120,1)", enemyAim: "rgba(255,70,180,0.9)" },
+            "dark": { selfFill: "rgba(60,90,140,0.75)", selfStroke: "rgba(200,220,255,0.7)", enemyFill: "rgba(95,95,105,0.65)", enemyStroke: "rgba(180,180,190,0.55)", hand: "rgba(180,145,120,0.9)", selfAim: "rgba(120,230,255,0.95)", enemyAim: "rgba(230,210,160,0.85)" }
+        };
+        return styles[vt] || styles.default;
+    }
+
+    function _weaponMeta(obj) {
+        const stateItems = Nozo.state && Nozo.state.itemsData && Array.isArray(Nozo.state.itemsData.raw)
+            ? Nozo.state.itemsData.raw : null;
+        const items = stateItems || (root.items && Array.isArray(root.items.weapons) ? root.items.weapons : null);
+        const wi = obj && Number.isInteger(obj.weaponIndex) ? obj.weaponIndex : -1;
+        const w = items && wi >= 0 ? items[wi] : null;
+        return {
+            weapon: w,
+            aboveHand: !!(w && w.aboveHand),
+            armS: (w && Number.isFinite(w.armS)) ? w.armS : 1,
+            hndS: (w && Number.isFinite(w.hndS)) ? w.hndS : 1,
+            hndD: (w && Number.isFinite(w.hndD)) ? w.hndD : 1
+        };
+    }
+
+    function _skinColorFor(p, fallback) {
+        const cfg = root.config || null;
+        const colors = cfg && Array.isArray(cfg.skinColors) ? cfg.skinColors : null;
+        if (!colors || p == null || p.skinColor == null) return fallback;
+        return colors[p.skinColor] || fallback;
+    }
+
+    function _drawWeaponSimple(ctx, len, width, color) {
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(len, 0);
+        ctx.lineWidth = width;
+        ctx.lineCap = "round";
+        ctx.strokeStyle = color;
+        ctx.stroke();
+    }
+
+    function _renderOnePlayer(ctx, localPx, localPy, cw, ch, p, layer, style) {
+        if (!p || p.visible === false || p.active === false) return;
+        const x = _px(p, "x");
+        const y = _px(p, "y");
+        if (x === null || y === null) return;
+
+        const sp = _worldToScreen(x, y, localPx, localPy, cw, ch);
+        const dir = (typeof p.dir === "number" && isFinite(p.dir)) ? p.dir : 0;
+        const scale = Math.max(16, Number(p.scale || 35) * state.scale);
+        const isSelf = Nozo.state && Nozo.state.player && p.sid != null && Nozo.state.player.sid === p.sid;
+
+        const wm = _weaponMeta(p);
+        const handAngle = (Math.PI / 4) * wm.armS;
+        const oHandAngle = (p.buildIndex < 0) ? wm.hndS : 1;
+        const oHandDist = (p.buildIndex < 0) ? wm.hndD : 1;
+        const skinFill = _skinColorFor(p, style.hand);
+        const weaponLen = Math.max(16, scale * 1.45);
+        const weaponWidth = Math.max(2.5, scale * 0.16);
+
+        // layer 0: legacy order (tail -> weapon below -> hands -> weapon above -> body -> skin hook)
+        if (layer === 0) {
+            if (p.tailIndex > 0 && Nozo.compat && typeof Nozo.compat.renderTail === "function") {
+                try { Nozo.compat.renderTail(p, ctx, state.scale); } catch (e) {}
+            }
+
+            if (p.buildIndex < 0 && !wm.aboveHand && wm.weapon) {
+                ctx.save();
+                ctx.translate(sp.x, sp.y);
+                ctx.rotate(dir);
+                _drawWeaponSimple(ctx, weaponLen, weaponWidth, style.enemyAim);
+                ctx.restore();
+            }
+
+            const handR = Math.max(4, 14 * state.scale);
+            ctx.beginPath();
+            ctx.arc(sp.x + Math.cos(dir + handAngle) * scale, sp.y + Math.sin(dir + handAngle) * scale, handR, 0, Math.PI * 2);
+            ctx.arc(
+                sp.x + Math.cos(dir - handAngle * oHandAngle) * (scale * oHandDist),
+                sp.y + Math.sin(dir - handAngle * oHandAngle) * (scale * oHandDist),
+                handR, 0, Math.PI * 2
+            );
+            ctx.fillStyle = skinFill;
+            ctx.fill();
+            ctx.lineWidth = Math.max(1.25, scale * 0.08);
+            ctx.strokeStyle = isSelf ? style.selfStroke : style.enemyStroke;
+            ctx.stroke();
+
+            if (p.buildIndex < 0 && wm.aboveHand && wm.weapon) {
+                ctx.save();
+                ctx.translate(sp.x, sp.y);
+                ctx.rotate(dir);
+                _drawWeaponSimple(ctx, weaponLen, weaponWidth, isSelf ? style.selfAim : style.enemyAim);
+                ctx.restore();
+            }
+
+            ctx.beginPath();
+            ctx.arc(sp.x, sp.y, scale, 0, Math.PI * 2);
+            ctx.fillStyle = isSelf ? style.selfFill : style.enemyFill;
+            ctx.fill();
+            ctx.lineWidth = Math.max(1.25, scale * 0.08);
+            ctx.strokeStyle = isSelf ? style.selfStroke : style.enemyStroke;
+            ctx.stroke();
+
+            if (p.skinIndex > 0 && Nozo.compat && typeof Nozo.compat.renderSkin === "function") {
+                try {
+                    ctx.save();
+                    ctx.translate(sp.x, sp.y);
+                    ctx.rotate(Math.PI / 2);
+                    Nozo.compat.renderSkin(p, ctx, state.scale);
+                    ctx.restore();
+                } catch (e) {}
+            }
+        }
+
+        // layer 1: facing/weapon indicator + sid label
+        if (layer === 1) {
+            const reach = scale * 1.5;
+            const tipX = sp.x + Math.cos(dir) * reach;
+            const tipY = sp.y + Math.sin(dir) * reach;
+
+            ctx.beginPath();
+            ctx.moveTo(sp.x, sp.y);
+            ctx.lineTo(tipX, tipY);
+            ctx.lineWidth = Math.max(2, scale * 0.16);
+            ctx.strokeStyle = isSelf ? style.selfAim : style.enemyAim;
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.arc(tipX, tipY, Math.max(2.5, scale * 0.12), 0, Math.PI * 2);
+            ctx.fillStyle = isSelf ? style.selfAim : style.enemyAim;
+            ctx.fill();
+
+            if (!isSelf && p.sid != null) {
+                ctx.font = "10px monospace";
+                ctx.fillStyle = "rgba(255,255,255,0.9)";
+                ctx.textAlign = "center";
+                ctx.fillText(String(p.sid), sp.x, sp.y - scale - 8);
+                ctx.textAlign = "start";
+            }
+        }
+    }
+
+    function _renderPlayers(ctx, localPx, localPy, cw, ch) {
+        const players = Nozo.state && Array.isArray(Nozo.state.players) ? Nozo.state.players : null;
+        if (!players || players.length === 0) return;
+        const style = getActiveStyle();
+        for (let layer = 0; layer <= 1; layer++) {
+            for (let i = 0; i < players.length; i++) {
+                _renderOnePlayer(ctx, localPx, localPy, cw, ch, players[i], layer, style);
+            }
+        }
+    }
+
     function _drawHudText(ctx, lines, cw, ch) {
         if (!lines || !lines.length) return;
         ctx.save();
@@ -256,6 +421,9 @@
     }
 
     function _readLegacyRenderFlags() {
+        const now = Date.now();
+        if (state._flagCache && (now - state._flagCacheAt) < 500) return state._flagCache;
+
         let showAutoPushRender = true;
         let showTracerGhost = true;
         let showSpikeCones = false;
@@ -267,11 +435,13 @@
                 showSpikeCones = (ls.getItem("showSpikeCones") ?? "0") === "1";
             }
         } catch (e) {}
-        return {
+        state._flagCache = {
             showAutoPushRender: showAutoPushRender,
             showTracerGhost: showTracerGhost,
             showSpikeCones: showSpikeCones
         };
+        state._flagCacheAt = now;
+        return state._flagCache;
     }
 
     function _getThingState() {
@@ -521,7 +691,11 @@
         const ch = canvas.height;
 
         try {
-            ctx.clearRect(0, 0, cw, ch);
+            const config = _getRenderConfig();
+            if (config.resetRender !== false) {
+                ctx.clearRect(0, 0, cw, ch);
+                ctx.beginPath();
+            }
 
             const nCtx = gameCtx || {};
             const player = nCtx.player || (Nozo.state && Nozo.state.player) || null;
@@ -578,6 +752,9 @@
             if (movePath && movePath.length > 1) {
                 _drawPath(ctx, movePath, px, py, cw, ch);
             }
+
+            // First-pass player render port (renderPlayers-style layered pass).
+            _renderPlayers(ctx, px, py, cw, ch);
 
             _drawKbiAnimations(ctx, px, py, cw, ch);
             _renderPushOverlay(ctx, px, py, cw, ch);

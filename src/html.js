@@ -11,6 +11,8 @@
     const _DEFAULTS = {
         "html.enabled":      true,
         "render.enabled":    true,
+        "render.visualType": "default",
+        "render.resetRender": true,
         "traps.enabled":     true,
         "autobreak.enabled": true,
         "autoplace.enabled": true,
@@ -94,6 +96,16 @@
 
     function _applyRender(val) {
         if (Nozo.render && typeof Nozo.render.setEnabled === "function") Nozo.render.setEnabled(val);
+    }
+    function _applyRenderVisualType(val) {
+        if (!Nozo.state) Nozo.state = {};
+        if (!Nozo.state.renderConfig) Nozo.state.renderConfig = {};
+        Nozo.state.renderConfig.visualType = String(val || "default");
+    }
+    function _applyRenderReset(val) {
+        if (!Nozo.state) Nozo.state = {};
+        if (!Nozo.state.renderConfig) Nozo.state.renderConfig = {};
+        Nozo.state.renderConfig.resetRender = !!val;
     }
 
     function _applyTraps(val) {
@@ -201,6 +213,35 @@
         return row;
     }
 
+    function _makeSelectRow(doc, labelText, key, options, onChangeFn) {
+        const row = doc.createElement("label");
+        row.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;font-size:12px;";
+
+        const span = doc.createElement("span");
+        span.textContent = labelText;
+
+        const sel = doc.createElement("select");
+        sel.style.cssText = "background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.2);color:#fff;font-size:11px;padding:2px 4px;border-radius:4px;";
+        const current = String(getValue(key) || "default");
+        for (let i = 0; i < options.length; i++) {
+            const opt = doc.createElement("option");
+            opt.value = options[i].value;
+            opt.textContent = options[i].label;
+            if (opt.value === current) opt.selected = true;
+            sel.appendChild(opt);
+        }
+        sel.addEventListener("change", function () {
+            setValue(key, sel.value);
+            if (typeof onChangeFn === "function") {
+                try { onChangeFn(sel.value); } catch (e) {}
+            }
+        });
+
+        row.appendChild(span);
+        row.appendChild(sel);
+        return row;
+    }
+
     function _injectWeaponHudStyles(doc) {
         if (!doc) return;
         if (doc.getElementById("nozoWeaponHudStyle")) return;
@@ -248,7 +289,11 @@
     function _resolveWeaponMeta(weaponIndex) {
         if (weaponIndex == null) return null;
         let w = null;
-        if (root.items && Array.isArray(root.items.weapons)) {
+        const nozoRaw = Nozo.state && Nozo.state.itemsData && Array.isArray(Nozo.state.itemsData.raw)
+            ? Nozo.state.itemsData.raw : null;
+        if (nozoRaw && nozoRaw[weaponIndex]) {
+            w = nozoRaw[weaponIndex];
+        } else if (root.items && Array.isArray(root.items.weapons)) {
             w = root.items.weapons[weaponIndex] || null;
         }
         const nozoList = Nozo.state && Nozo.state.itemsData && Array.isArray(Nozo.state.itemsData.list)
@@ -382,6 +427,21 @@
         // --- Render section ---
         body.appendChild(_makeSection(doc, "Render"));
         body.appendChild(_makeRow(doc, "Render Overlay", "render.enabled", _applyRender));
+        body.appendChild(_makeSelectRow(doc, "Visual Type", "render.visualType", [
+            { value: "default", label: "Default" },
+            { value: "classic", label: "Classic" },
+            { value: "neo", label: "Neo" },
+            { value: "neon", label: "Neon" },
+            { value: "dark", label: "Dark" },
+            { value: "vapor", label: "Vapor" },
+            { value: "bright", label: "Bright" },
+            { value: "midnight", label: "Midnight" },
+            { value: "sunset", label: "Sunset" },
+            { value: "emerald", label: "Emerald" },
+            { value: "amethyst", label: "Amethyst" },
+            { value: "crimson", label: "Crimson" }
+        ], _applyRenderVisualType));
+        body.appendChild(_makeRow(doc, "Reset Render", "render.resetRender", _applyRenderReset));
         body.appendChild(_makeRow(doc, "AutoPush Render", "render.autoPush", _applyRenderAutoPush));
         body.appendChild(_makeRow(doc, "Spike Cones", "render.spikeCones", _applyRenderSpikeCones));
         body.appendChild(_makeRow(doc, "Tracer Ghost", "render.tracerGhost", _applyRenderTracerGhost));
@@ -429,6 +489,8 @@
 
         // Apply persisted state to live modules immediately on mount.
         _applyRender(!!state.settings["render.enabled"]);
+        _applyRenderVisualType(String(state.settings["render.visualType"] || "default"));
+        _applyRenderReset(!!state.settings["render.resetRender"]);
         _applyTraps(!!state.settings["traps.enabled"]);
         _applyAutoBreak(!!state.settings["autobreak.enabled"]);
         _applyAutoPlace(!!state.settings["autoplace.enabled"]);
