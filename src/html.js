@@ -244,16 +244,18 @@
     function _refreshDebugInfo() {
         const el = state._debugInfoEl;
         if (!el || !state.mounted || !state.visible) return;
-        const s = Nozo.state || {};
-        const h = (Nozo.healer && Nozo.healer.state) || {};
-        const player = s.player || {};
+        const s  = Nozo.state || {};
+        const h  = (Nozo.healer && Nozo.healer.state) || {};
+        const ts = (Nozo.tickScheduler && Nozo.tickScheduler.state) || {};
+        const player     = s.player || {};
         const itemsCount = s.itemsData && Array.isArray(s.itemsData.list) ? s.itemsData.list.length : "-";
         const agesCount  = s.agesData  && Array.isArray(s.agesData.list)  ? s.agesData.list.length  : "-";
         const lastHeal   = h.lastHealAt ? ((Date.now() - h.lastHealAt) / 1000).toFixed(1) + "s ago" : "-";
         el.textContent = [
             "initData: " + (s.initDataParsed ? "ready" : "pending") + " | items:" + itemsCount + " ages:" + agesCount,
             "healer: "   + (h.enabled ? "on" : "off") + " | heals:" + (h.healCount || 0) + " shame:" + (player.shameCount || 0),
-            "lastHeal: " + lastHeal
+            "lastHeal: " + lastHeal,
+            "sched: q=" + (ts.pendingCount || 0) + " run=" + (ts.totalExecuted || 0) + " last=" + (ts.lastExecutedTag || "-")
         ].join("\n");
     }
 

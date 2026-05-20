@@ -14,19 +14,22 @@
     // Default food heal amount when initData is absent.
     const _DEFAULT_FOOD_HEAL = 20;
     // Delay before a shame increment is reversed (mirrors addShameTimer cooldown).
-    const _SHAME_DECAY_MS = 14000;
+    const _SHAME_DECAY_MS    = 14000;
+    // Tick equivalent for shame decay (14000 ms / 50 ms per tick).
+    const _SHAME_DECAY_TICKS = 280;
 
     const maxHistory = (Nozo.constants && Nozo.constants.MAX_LOG) || 64;
     const _history = [];
 
     // Live healer state — reachable at Nozo.state.healer and Nozo.healer.state.
     const state = {
-        enabled:           true,
-        pendingTimer:      null,
-        lastHealAt:        0,
-        lastTriggerReason: null,
-        lastBlockReason:   null,
-        healCount:         0
+        enabled:            true,
+        pendingTimer:       null,
+        pendingScheduledId: null,
+        lastHealAt:         0,
+        lastTriggerReason:  null,
+        lastBlockReason:    null,
+        healCount:          0
     };
 
     function _record(kind, detail) {
@@ -43,16 +46,42 @@
     }
 
     // Food heal amount per item. Tries live initData first, then defaults.
-    function _getFoodHealAmount(player) {
+    function _getFoodHealAmount(itemId) {
         const s = Nozo.state;
-        if (s && s.itemsData && Array.isArray(s.itemsData.list) && player && player.items) {
-            const foodId = player.items[0];
-            if (foodId != null) {
-                const item = s.itemsData.list[foodId];
-                if (item && typeof item.healing === "number" && item.healing > 0) return item.healing;
-            }
+        if (s && s.itemsData && Array.isArray(s.itemsData.list) && itemId != null) {
+            const item = s.itemsData.list[itemId];
+            if (item && typeof item.healing === "number" && item.healing > 0) return item.healing;
         }
         return _DEFAULT_FOOD_HEAL;
+    }
+
+    function _getFoodCount(player, itemId) {
+        if (!player || itemId == null) return Infinity;
+        const counts = player.itemCounts;
+        if (!counts) return Infinity;
+        if (typeof counts[itemId] === "number") return counts[itemId];
+        if (Array.isArray(counts) && typeof counts[itemId] === "number") return counts[itemId];
+        return Infinity;
+    }
+
+    function _resolveFoodItem(player) {
+        if (!player) return null;
+        const slots = Array.isArray(player.items) ? player.items : [];
+        if (!slots.length) return null;
+        let best = null;
+        let bestHeal = 0;
+        for (let i = 0; i < slots.length; i++) {
+            const itemId = slots[i];
+            if (itemId == null) continue;
+            const count = _getFoodCount(player, itemId);
+            if (count <= 0) continue;
+            const heal = _getFoodHealAmount(itemId);
+            if (heal > bestHeal) {
+                bestHeal = heal;
+                best = { id: itemId, heal: heal, count: count };
+            }
+        }
+        return best;
     }
 
     // Number of food items needed to reach full health. Returns 0 when nothing to do.
@@ -61,7 +90,8 @@
         if (player.health >= 100) return 0;
         // Skin 45 = shame, skin 56 = special — skip healing in these states.
         if (player.skinIndex === 45 || player.skinIndex === 56) return 0;
-        const healAmt = _getFoodHealAmount(player);
+        const food = _resolveFoodItem(player);
+        const healAmt = food ? food.heal : _DEFAULT_FOOD_HEAL;
         if (!healAmt) return 0;
         return Math.ceil((100 - player.health) / healAmt);
     }
@@ -118,7 +148,14 @@
             return false;
         }
 
-        const itemIndex = player.items && player.items[0] != null ? player.items[0] : 0;
+        const food = _resolveFoodItem(player);
+        const itemIndex = food ? food.id : null;
+        if (itemIndex == null) {
+            state.lastBlockReason = "noFoodItem";
+            _record("heal:blocked", { reason: "noFoodItem", cause: reason });
+            if (Nozo.log) Nozo.log("healer:blocked", { reason: "noFoodItem", cause: reason });
+            return false;
+        }
         _record("heal:execute", { count: count, angle: angle, itemIndex: itemIndex, reason: reason, tick: _currentTick() });
         if (Nozo.log) Nozo.log("healer:execute", { count: count, angle: angle, itemIndex: itemIndex, reason: reason });
 
@@ -133,7 +170,12 @@
 
         // Skin 56 requires a one-tick delay before placement (mirrors original healer branch).
         if (player.skinIndex === 56) {
-            setTimeout(_placeAll, 50);
+            if (Nozo.tickScheduler && typeof Nozo.tickScheduler.scheduleNextTick === "function" &&
+                    Nozo.state && typeof Nozo.state.tick === "number") {
+                Nozo.tickScheduler.scheduleNextTick(_placeAll, { tag: "skin56Heal" });
+            } else {
+                setTimeout(_placeAll, 50);
+            }
         } else {
             _placeAll();
         }
@@ -144,7 +186,8 @@
         return true;
     }
 
-    // Increment player.shameCount by count, then decrement after _SHAME_DECAY_MS.
+    // Increment player.shameCount by count, then decrement after decay period.
+    // Prefers tick scheduler; falls back to ms-timeout when tick context is unavailable.
     // Captures the player reference at call time so respawn doesn't corrupt the counter.
     function _addShameTimer(count) {
         const player = Nozo.state && Nozo.state.player;
@@ -152,28 +195,49 @@
         if (typeof player.shameCount !== "number") player.shameCount = 0;
         player.shameCount += count;
         const target = player;
-        setTimeout(function () {
+        const decrement = function () {
             if (typeof target.shameCount === "number" && target.shameCount > 0) {
                 target.shameCount = Math.max(0, target.shameCount - count);
             }
-        }, _SHAME_DECAY_MS);
+        };
+        if (Nozo.tickScheduler && typeof Nozo.tickScheduler.scheduleInTicks === "function" &&
+                Nozo.state && typeof Nozo.state.tick === "number") {
+            Nozo.tickScheduler.scheduleInTicks(_SHAME_DECAY_TICKS, decrement, { tag: "shameDecay" });
+        } else {
+            setTimeout(decrement, _SHAME_DECAY_MS);
+        }
     }
 
-    // Cancel any pending heal timer.
+    // Cancel any pending heal timer (both ms-based and tick-based paths).
     function _cancelPending() {
         if (state.pendingTimer) {
             clearTimeout(state.pendingTimer);
             state.pendingTimer = null;
         }
+        if (state.pendingScheduledId != null) {
+            if (Nozo.tickScheduler && typeof Nozo.tickScheduler.cancel === "function") {
+                Nozo.tickScheduler.cancel(state.pendingScheduledId);
+            }
+            state.pendingScheduledId = null;
+        }
     }
 
-    // Schedule a delayed heal trigger.
+    // Schedule a delayed heal trigger. Uses tick scheduler when available, ms-timeout as fallback.
     function _scheduleHeal(delayMs, reason) {
         _cancelPending();
-        state.pendingTimer = setTimeout(function () {
+        const fn = function () {
             state.pendingTimer = null;
+            state.pendingScheduledId = null;
             requestHeal(reason, { fromTimer: true });
-        }, Math.max(0, delayMs));
+        };
+        if (Nozo.tickScheduler && typeof Nozo.tickScheduler.scheduleInTicks === "function" &&
+                Nozo.state && typeof Nozo.state.tick === "number") {
+            const delayTicks = Math.max(1, Math.ceil(delayMs / 50));
+            state.pendingScheduledId = Nozo.tickScheduler.scheduleInTicks(
+                delayTicks, fn, { tag: "healSchedule:" + reason });
+        } else {
+            state.pendingTimer = setTimeout(fn, Math.max(0, delayMs));
+        }
     }
 
     // requestHeal: primary entry point for triggering a heal.
