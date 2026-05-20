@@ -330,7 +330,7 @@
         }
         hud.style.display = "";
 
-        const wi = player.weaponIndex;
+        const wi = Number.isFinite(player.weaponIndex) ? player.weaponIndex : 0;
         const meta = _resolveWeaponMeta(wi);
         const reload = (player.reloads && typeof player.reloads[wi] === "number") ? player.reloads[wi] : 0;
         const maxReload = Math.max(
@@ -348,7 +348,13 @@
         if (!icon || !label || !bar || !text) return;
 
         const spriteUrl = _resolveWeaponSpriteUrl(meta);
-        if (spriteUrl && icon.getAttribute("src") !== spriteUrl) icon.setAttribute("src", spriteUrl);
+        if (spriteUrl) {
+            if (icon.getAttribute("src") !== spriteUrl) icon.setAttribute("src", spriteUrl);
+            icon.style.display = "";
+        } else {
+            icon.removeAttribute("src");
+            icon.style.display = "none";
+        }
         label.textContent = (meta && meta.name) ? meta.name : ("weapon " + wi);
 
         const progress = 1 - Math.max(0, Math.min(1, reload / maxReload));

@@ -207,6 +207,9 @@
             if (Nozo.log) Nozo.log("error:net:_handlerA:noPlayerModel", { tupleLen: data.length });
             return;
         }
+        if (data.length % 13 !== 0 && Nozo.log) {
+            Nozo.log("warn:net:a:partial-tuple", { len: data.length, rem: data.length % 13 });
+        }
         s.playersRaw = data;
         if (!Array.isArray(s.players)) s.players = [];
 
@@ -258,6 +261,9 @@
         if (!om || typeof om.decorateAndUpsert !== "function") {
             if (Nozo.log) Nozo.log("error:net:_handlerH:noObjectManager", { tupleLen: data.length });
             return;
+        }
+        if (data.length % 8 !== 0 && Nozo.log) {
+            Nozo.log("warn:net:H:partial-tuple", { len: data.length, rem: data.length % 8 });
         }
         _ensureArrays();
         for (let i = 0; i + 8 <= data.length; i += 8) {
@@ -312,6 +318,18 @@
         if (!player || index == null) return;
         if (typeof index !== "string" && typeof index !== "number") return;
         if (index === "__proto__" || index === "constructor" || index === "prototype") return;
+
+        // Numeric N-packets map to weapon reload slots.
+        if (typeof index === "number") {
+            const pm = Nozo.playerModel || null;
+            if (pm && typeof pm.setReload === "function") {
+                pm.setReload(player, index, value);
+            } else {
+                if (!player.reloads || typeof player.reloads !== "object") player.reloads = {};
+                player.reloads[index] = typeof value === "number" ? value : 0;
+            }
+            return;
+        }
         player[index] = value;
     }
 
@@ -497,6 +515,9 @@
         if (!Array.isArray(s.ais)) s.ais = [];
         if (!s.aiBySid || typeof s.aiBySid !== "object") s.aiBySid = {};
 
+        if (data.length % 7 !== 0 && Nozo.log) {
+            Nozo.log("warn:net:I:partial-tuple", { len: data.length, rem: data.length % 7 });
+        }
         for (let i = 0; i + 7 <= data.length; i += 7) {
             const sid = data[i];
             if (sid == null) continue;
@@ -551,7 +572,10 @@
             return;
         }
         const obj = om.getBySid(sid);
-        if (!obj) return;
+        if (!obj) {
+            if (Nozo.log) Nozo.log("warn:net:L:notFound", { sid: sid });
+            return;
+        }
         if (typeof dir === "number") obj.dir = dir;
         if (typeof x === "number") obj.x = x;
         if (typeof y === "number") obj.y = y;

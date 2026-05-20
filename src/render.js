@@ -10,6 +10,8 @@
         enabled: true,
         canvas: null,
         context: null,
+        gameCanvas: null,
+        gameContext: null,
         scale: 1,
         debugPath: null,
         attached: false,
@@ -83,6 +85,12 @@
 
     function attach(canvas) {
         if (state.attached) detach();
+        state.gameCanvas = canvas || (root.document && root.document.getElementById("gameCanvas")) || null;
+        try {
+            state.gameContext = state.gameCanvas && state.gameCanvas.getContext ? state.gameCanvas.getContext("2d") : null;
+        } catch (e) {
+            state.gameContext = null;
+        }
         // Always draw on a dedicated overlay canvas.
         // Never bind directly to gameCanvas (clearing would wipe native world render).
         state.canvas = _createOverlay();
@@ -114,6 +122,8 @@
         }
         state.canvas = null;
         state.context = null;
+        state.gameCanvas = null;
+        state.gameContext = null;
         state.attached = false;
         if (Nozo.log) Nozo.log("render:detach", {});
     }
@@ -363,6 +373,24 @@
                     ctx.restore();
                 } catch (e) {}
             }
+
+            // BUILD ITEM: when buildIndex >= 0 the player holds a placed item.
+            // Draw a small indicator circle at arm's reach in the facing direction.
+            if (p.buildIndex >= 0) {
+                ctx.save();
+                ctx.translate(sp.x, sp.y);
+                ctx.rotate(dir);
+                const bLen = Math.max(14, scale * 0.85);
+                const bR = Math.max(4, scale * 0.22);
+                ctx.beginPath();
+                ctx.arc(bLen, 0, bR, 0, Math.PI * 2);
+                ctx.fillStyle = isSelf ? "rgba(100,220,100,0.80)" : "rgba(200,200,200,0.55)";
+                ctx.fill();
+                ctx.strokeStyle = isSelf ? "rgba(60,200,60,0.90)" : "rgba(150,150,150,0.70)";
+                ctx.lineWidth = Math.max(1, scale * 0.06);
+                ctx.stroke();
+                ctx.restore();
+            }
         }
 
         // layer 1: facing/weapon indicator + sid label
@@ -445,7 +473,9 @@
     }
 
     function _getThingState() {
-        return Nozo.globals || root._things || {};
+        // Prefer root._things (moomoo.js's own _things object, exposed at unsafeWindow._things).
+        // Nozo.globals is the Nozo-state-backed alias; fall through to it only when _things absent.
+        return root._things || Nozo.globals || {};
     }
 
     function _renderPushOverlay(ctx, px, py, cw, ch) {
@@ -680,6 +710,111 @@
         ctx.restore();
     }
 
+    function _renderDeadPlayers(ctx, px, py, cw, ch) {
+        const s = Nozo.state;
+        if (!s || !Array.isArray(s.players)) return;
+        const style = getActiveStyle();
+        for (let i = 0; i < s.players.length; i++) {
+            const p = s.players[i];
+            if (!p || p.alive !== false) continue;
+            const x = _px(p, "x");
+            const y = _px(p, "y");
+            if (x === null || y === null) continue;
+            const sp = _worldToScreen(x, y, px, py, cw, ch);
+            const scale = Math.max(12, Number(p.scale || 35) * state.scale);
+
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(sp.x, sp.y, scale, 0, Math.PI * 2);
+            ctx.fillStyle = "rgba(100,100,100,0.40)";
+            ctx.fill();
+            ctx.strokeStyle = "rgba(140,140,140,0.60)";
+            ctx.lineWidth = Math.max(1.2, scale * 0.06);
+            ctx.setLineDash([4, 4]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            ctx.font = Math.max(8, Math.round(scale * 0.38)) + "px monospace";
+            ctx.fillStyle = "rgba(180,180,180,0.75)";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText("(EZ)", sp.x, sp.y);
+            ctx.textAlign = "start";
+            ctx.textBaseline = "alphabetic";
+            ctx.restore();
+        }
+    }
+
+    function _renderAIs(ctx, px, py, cw, ch) {
+        const s = Nozo.state;
+        if (!s || !Array.isArray(s.ais) || !s.ais.length) return;
+        for (let i = 0; i < s.ais.length; i++) {
+            const ai = s.ais[i];
+            if (!ai || ai.visible === false || ai.active === false) continue;
+            const x = _px(ai, "x");
+            const y = _px(ai, "y");
+            if (x === null || y === null) continue;
+            const sp = _worldToScreen(x, y, px, py, cw, ch);
+            const sc = Math.max(6, (ai.scale || 35) * state.scale);
+            const dir = (typeof ai.dir === "number" && isFinite(ai.dir)) ? ai.dir : 0;
+
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(sp.x, sp.y, sc, 0, Math.PI * 2);
+            ctx.fillStyle = "rgba(180,120,60,0.40)";
+            ctx.fill();
+            ctx.strokeStyle = "rgba(210,160,80,0.80)";
+            ctx.lineWidth = Math.max(1.2, sc * 0.06);
+            ctx.stroke();
+
+            const tipX = sp.x + Math.cos(dir) * sc;
+            const tipY = sp.y + Math.sin(dir) * sc;
+            ctx.beginPath();
+            ctx.moveTo(sp.x, sp.y);
+            ctx.lineTo(tipX, tipY);
+            ctx.strokeStyle = "rgba(255,180,60,0.85)";
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+            ctx.restore();
+        }
+    }
+
+    function _renderProjectiles(ctx, px, py, cw, ch) {
+        const s = Nozo.state;
+        if (!s || !s.projectiles || typeof s.projectiles !== "object") return;
+        const keys = Object.keys(s.projectiles);
+        if (!keys.length) return;
+        const now = Date.now();
+        for (let i = 0; i < keys.length; i++) {
+            const p = s.projectiles[keys[i]];
+            if (!p) continue;
+            const age = now - (typeof p.t === "number" ? p.t : now);
+            if (age > 3000) continue;
+            const x = typeof p.x === "number" ? p.x : null;
+            const y = typeof p.y === "number" ? p.y : null;
+            if (x === null || y === null) continue;
+            const sp = _worldToScreen(x, y, px, py, cw, ch);
+            const alpha = Math.max(0.2, 1 - age / 3000);
+            const r = Math.max(3, 5 * state.scale);
+
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(sp.x, sp.y, r, 0, Math.PI * 2);
+            ctx.fillStyle = "rgba(255,210,60," + alpha.toFixed(3) + ")";
+            ctx.fill();
+            if (typeof p.dir === "number" && isFinite(p.dir)) {
+                const len = Math.max(8, 12 * state.scale);
+                ctx.beginPath();
+                ctx.moveTo(sp.x, sp.y);
+                ctx.lineTo(sp.x + Math.cos(p.dir) * len, sp.y + Math.sin(p.dir) * len);
+                ctx.strokeStyle = "rgba(255,210,60," + alpha.toFixed(3) + ")";
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+            }
+            ctx.restore();
+        }
+    }
+
     function draw(gameCtx) {
         if (!state.enabled) return;
         if (!state.attached || !state.context || !state.canvas) return;
@@ -704,6 +839,18 @@
             const px = _px(player, "x");
             const py = _px(player, "y");
             if (px === null || py === null) return;
+
+            // World/player/object rendering on actual gameCanvas path (not overlay).
+            const gctx = state.gameContext;
+            const gc = state.gameCanvas;
+            if (gctx && gc) {
+                const gw = gc.width || cw;
+                const gh = gc.height || ch;
+                _renderPlayers(gctx, px, py, gw, gh);
+                _renderDeadPlayers(gctx, px, py, gw, gh);
+                _renderAIs(gctx, px, py, gw, gh);
+                _renderProjectiles(gctx, px, py, gw, gh);
+            }
 
             const cx = cw / 2;
             const cy = ch / 2;
@@ -753,9 +900,6 @@
                 _drawPath(ctx, movePath, px, py, cw, ch);
             }
 
-            // First-pass player render port (renderPlayers-style layered pass).
-            _renderPlayers(ctx, px, py, cw, ch);
-
             _drawKbiAnimations(ctx, px, py, cw, ch);
             _renderPushOverlay(ctx, px, py, cw, ch);
             _renderSpikeCones(ctx, px, py, cw, ch);
@@ -802,7 +946,8 @@
         detach: detach,
         draw: draw,
         setDebugPath: setDebugPath,
-        getDebugState: getDebugState
+        getDebugState: getDebugState,
+        getActiveStyle: getActiveStyle
     };
 
     Nozo.render = render;
